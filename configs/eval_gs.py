@@ -16,8 +16,15 @@ class EvalGSConfig:
     checkpoint_dir: str = ""
     """Directory produced by train_gs.py (contains model_final.pt + config.json)."""
 
-    global_opt_subdir: str = "after_global_optimization"
-    """Global-optimization checkpoint subdirectory inside `root_path/run/`."""
+    global_opt_subdir: str = ""
+    """
+    Optional global-optimization checkpoint subdirectory inside `root_path/run/`.
+
+    If left empty (recommended), `eval_gs` will attempt to infer the correct
+    subdirectory from the GS training config and existing folders. This makes
+    evaluation agnostic to whether Stage 2 global optimization was run (e.g.
+    `after_global_optimization`) or skipped (e.g. `after_non_rigid_icp`).
+    """
 
     transforms_path: Optional[str] = None
     """Path to transforms JSON. Default: <root_path>/gs_video/0000_extend_transforms.json"""

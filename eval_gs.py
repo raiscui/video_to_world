@@ -75,15 +75,48 @@ def _build_model(
     height: int,
     width: int,
 ) -> CanonicalGSModel:
-    # Load global-optimization checkpoint pieces
-    global_opt_dir = os.path.join(config.root_path, config.run, config.global_opt_subdir)
+    # Use training config from checkpoint dir so model structure matches
+    # (renderer, SH degree, target_num_points, etc.) and to infer the
+    # correct global-optimization subdirectory when possible.
+    train_cfg = _load_training_config(config.checkpoint_dir)
+
+    # Resolve which global-optimization (or equivalent) subdirectory to use.
+    # Priority:
+    #   1) Explicit CLI / config `global_opt_subdir` if non-empty
+    #   2) `global_opt_subdir` recorded in the GS training config.json
+    #   3) Auto-detect among common candidates (e.g. after_global_optimization,
+    #      after_non_rigid_icp) by checking which directory actually exists.
+    subdir = (config.global_opt_subdir or "").strip()
+    if not subdir:
+        cfg_subdir = str(train_cfg.get("global_opt_subdir", "")).strip()
+        if cfg_subdir:
+            subdir = cfg_subdir
+
+    if not subdir:
+        candidate_subdirs = [
+            "after_global_optimization",
+            "after_non_rigid_icp",
+        ]
+        for cand in candidate_subdirs:
+            cand_dir = os.path.join(config.root_path, config.run, cand)
+            if os.path.isdir(cand_dir):
+                subdir = cand
+                break
+
+    if not subdir:
+        raise FileNotFoundError(
+            "Could not determine global optimization directory. "
+            "Tried: explicit `config.global_opt_subdir`, training config "
+            "`global_opt_subdir`, and common defaults like "
+            "`after_global_optimization` / `after_non_rigid_icp`. "
+            "Please set --config.global-opt-subdir explicitly."
+        )
+
+    global_opt_dir = os.path.join(config.root_path, config.run, subdir)
     if not os.path.exists(global_opt_dir):
         raise FileNotFoundError(f"Global-optimization directory not found: {global_opt_dir}")
 
     canonical_pts, canonical_cols = load_aligned_point_cloud(global_opt_dir, device)
-
-    # Use training config from checkpoint dir so model structure matches (renderer, SH degree, target_num_points, etc.)
-    train_cfg = _load_training_config(config.checkpoint_dir)
 
     # Downsample — must mirror training's target_num_points if you want strict weight loading.
     target_num_points = int(train_cfg.get("target_num_points", config.target_num_points))
