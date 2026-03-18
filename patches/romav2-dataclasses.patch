@@ -1,0 +1,13 @@
+diff --git a/pyproject.toml b/pyproject.toml
+index 7bff1a8..ba2d5e6 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -8,7 +8,7 @@ authors = [
+ ]
+ requires-python = ">=3.10"
+ dependencies = [
+-    "dataclasses>=0.8",
++    "dataclasses",
+     "einops>=0.8.1",
+     "pillow>=12.0.0",
+     "rich>=14.2.0",

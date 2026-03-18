@@ -30,6 +30,9 @@ cd video_to_world
 
 conda create -n video_to_world python=3.10
 conda activate video_to_world
+
+# Keep DA3-compatible numpy/opencv versions (numpy<2; opencv<4.12)
+pip install "numpy<2" "opencv-python<4.12"
 ```
 
 First, set up [DepthAnything-3](https://github.com/ByteDance-Seed/depth-anything-3):
@@ -38,15 +41,15 @@ First, set up [DepthAnything-3](https://github.com/ByteDance-Seed/depth-anything
 mkdir -p third_party
 
 # Clone DA3
-git clone https://github.com/DepthAnything/Depth-Anything-3.git third_party/Depth-Anything-3
-git -C third_party/Depth-Anything-3 checkout 2c21ea849ceec7b469a3e62ea0c0e270afc3281a
+git clone https://github.com/ByteDance-Seed/depth-anything-3 third_party/depth-anything-3
+git -C third_party/depth-anything-3 checkout 2c21ea849ceec7b469a3e62ea0c0e270afc3281a
 
 # Install DA3 + deps (minimal set for npz + gs_video)
-pip install xformers torch>=2 torchvision
-pip install -e third_party/Depth-Anything-3
+pip install xformers torch\>=2 torchvision
+pip install -e third_party/depth-anything-3
 
 # Apply the trajectory-export patch
-git -C third_party/Depth-Anything-3 apply ../../patches/da3-export-trajectory.patch
+git -C third_party/depth-anything-3 apply ../../patches/da3-export-trajectory.patch
 ```
 
 Install `gsplat`:
@@ -59,14 +62,40 @@ pip install --no-build-isolation \
 Install `tinycudann`:
 
 ```bash
-pip install "git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch"
+pip install setuptools==81.0.0
+pip install "git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch" --no-build-isolation
 ```
 
 Then install the remaining dependencies:
 
 ```bash
-pip install open3d opencv-python scipy tyro tqdm tensorboard
-pip install lpips romav2 romatch viser nerfview
+pip install open3d scipy tyro tqdm tensorboard
+pip install lpips viser nerfview romatch
+```
+
+Install RoMaV2 (patched to avoid a `dataclasses>=0.8` dependency-resolution issue, see [Parskatt/RoMaV2#26](https://github.com/Parskatt/RoMaV2/issues/26)):
+
+```bash
+# Clone RoMaV2
+git clone https://github.com/Parskatt/RoMaV2 third_party/RoMaV2
+
+# Patch dependency metadata (dataclasses>=0.8 -> dataclasses)
+git -C third_party/RoMaV2 apply ../../patches/romav2-dataclasses.patch
+
+# Install (optionally add `fused-local-corr` for the fused local correlation kernel)
+pip install -e "third_party/RoMaV2[fused-local-corr]"
+```
+
+Optionally, install [torch_kdtree](https://github.com/thomgrand/torch_kdtree) for GPU-accelerated KD-tree nearest-neighbor queries:
+
+```bash
+export CUDA_HOME=/usr/local/cuda # point to a local installation of a corresponding cuda toolkit version
+git clone https://github.com/thomgrand/torch_kdtree third_party/torch_kdtree
+cd third_party/torch_kdtree
+git submodule init && git submodule update
+pip install -U cmake ninja
+CPLUS_INCLUDE_PATH="$CUDA_HOME/include:${CPLUS_INCLUDE_PATH:-}" PATH="$CONDA_PREFIX/bin:$PATH" python -m pip install . --no-build-isolation
+cd ../..
 ```
 
 ## Quickstart
@@ -244,4 +273,5 @@ Our work builds on top of amazing open-source projects. We thank the authors for
 - [RoMa](https://github.com/Parskatt/RoMa): robust dense feature matching used for correspondences during alignment.
 - [gsplat](https://github.com/nerfstudio-project/gsplat): Gaussian splatting rasterizer used for 2DGS/3DGS training and rendering.
 - [tiny-cuda-nn](https://github.com/NVlabs/tiny-cuda-nn): hash-grid encodings used by the deformation networks.
+- [torch_kdtree](https://github.com/thomgrand/torch_kdtree): optional GPU-accelerated KD-tree for nearest-neighbor queries.
 
