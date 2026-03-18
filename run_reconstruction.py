@@ -118,6 +118,9 @@ class PipelineConfig:
     """Print commands without executing."""
 
 
+_PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+
 def _run(cmd: list[str], dry_run: bool = False) -> None:
     """Run a command, printing it first."""
     cmd_str = " ".join(cmd)
@@ -125,7 +128,7 @@ def _run(cmd: list[str], dry_run: bool = False) -> None:
     print(f"[PIPELINE] {cmd_str}")
     print(f"{'=' * 80}\n")
     if not dry_run:
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True, cwd=_PROJECT_ROOT)
 
 
 def _find_subdir(parent: str, prefix: str) -> Optional[str]:

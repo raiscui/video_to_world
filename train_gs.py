@@ -557,7 +557,8 @@ def main(config: GSConfig):
             cmd.extend(["--config.original-images-dir", config.original_images_dir])
         try:
             logger.info("Running automatic eval via: %s", " ".join(cmd))
-            subprocess.run(cmd, check=True)
+            project_root = os.path.dirname(os.path.abspath(__file__))
+            subprocess.run(cmd, check=True, cwd=project_root)
         except Exception as e:
             logger.error("Automatic eval failed: %s", e)
 
