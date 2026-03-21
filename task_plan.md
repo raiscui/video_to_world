@@ -837,3 +837,104 @@
 
 ### 状态
 **目前仍在阶段3** - 修复后的真实 GS smoke 已启动, 正在等待 150 iter 收尾结果。
+
+## [2026-03-22 00:00:34] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 修复后 GS smoke 训练已完成,新的首阻塞转为 auto eval 缺失 transforms
+
+### 已观察到的现象
+- 150 iter 的 GS 训练已经完成。
+- `checkpoint_000100.pt`、`checkpoint_000149.pt`、`model_final.pt`、`splats_3dgs.ply` 已落盘。
+- `eval_gs` 在读取 `/tmp/video_to_world_joint_scene_xhc_bai_fast_run_full_default_20260321_2238/gs_video/0000_extend_transforms.json` 时报 `FileNotFoundError`。
+
+### 当前主假设
+- 主假设: 当前 root 缺少 auto eval 依赖的 transforms 资产, 所以错误发生在评估阶段, 不在训练阶段。
+- 备选解释: `eval_gs` 对 joint scene 的默认 transforms 路径推导本身有兼容性问题。
+
+### 下一步行动
+- [ ] 追踪 `train_gs -> eval_gs` 的 transforms 路径来源。
+- [ ] 决定修默认路径, 还是通过正式参数关闭 auto eval 并完成无错误 smoke 收尾。
+
+### 状态
+**目前仍在阶段3** - GS 训练本体已完成, 正在处理 auto eval 的 transforms 缺失问题。
+
+## [2026-03-22 00:08:35] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: auto eval 的 transforms 问题已修复,新的首阻塞转为父训练进程占用显存导致子评估 OOM
+
+### 已验证现象
+- 手动独立执行 `eval_gs` 已成功。
+- `train_gs` 内的 auto eval 仍然失败, 错误为 `torch.OutOfMemoryError`。
+- 报错中明确显示父训练进程在 auto eval 启动时仍占用约 24.87 GiB 显存。
+
+### 当前主假设
+- 主假设: `train_gs` 在 `subprocess.run(eval_gs)` 前没有释放 GPU 大对象, 子进程因此被父进程残留显存挤爆。
+- 备选解释: `eval_gs` 一次性把过多原图搬到 GPU, 即使父进程释放显存也仍可能超限。
+
+### 下一步行动
+- [ ] 追踪 `train_gs` auto eval 前的显存释放路径。
+- [ ] 做最小修复并再次跑入口级 smoke,确认没有 error。
+
+### 状态
+**目前仍在阶段3** - 正在处理 auto eval 的跨进程显存占用问题。
+
+## [2026-03-22 00:16:43] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 默认后半程测试运行已完成,本轮真实阻塞已收敛并验证通过
+
+### 已完成事项
+- [x] 继续默认后半程真实运行,确认 Stage 2 与默认 LPIPS Stage 3.2 都能启动
+- [x] 修复 `run_reconstruction.py` 吞掉 `gs.num_iters` 显式覆盖的问题
+- [x] 修复 `eval_gs.py` 对缺失 `gs_video` transforms 的硬依赖
+- [x] 修复 `train_gs.py` 在 auto eval 前未释放父进程 CUDA 状态的问题
+- [x] 跑通入口级 smoke,确认最终日志中无 `Automatic eval failed` / `Traceback` / `[ERROR]`
+
+### 当前结果
+- 默认 Stage 1 成功目录:
+  - `/tmp/video_to_world_joint_scene_xhc_bai_fast_run_full_default_20260321_2238/frame_to_model_icp_50_2_offset0_allcache_20260321_2334`
+- 最终无 error 的入口级 smoke 目录:
+  - `/tmp/video_to_world_joint_scene_xhc_bai_fast_run_full_default_20260321_2238/frame_to_model_icp_50_2_offset0_allcache_20260321_2334/gs_3dgs_lpips_postoomfix_20260322_001016`
+- 最终关键日志:
+  - `/tmp/video_to_world_xhc_bai_run_reconstruction_postoomfix_20260322_001016.log`
+
+### 状态
+**目前在阶段4** - 本轮默认后半程测试运行已完成,正在整理最终交付结论。
+## [2026-03-22 00:25:40] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 回答 gs_video transforms 与自动降级语义
+
+### 已确认结论
+- `gs_video/0000_extend_transforms.json` 是 DA3 在导出 `gs_video/0000_extend.mp4` 时同步导出的 NeRF-style 相机轨迹文件。
+- 文件内包含评估所需的全局内参(`fl_x/fl_y/cx/cy/w/h`)与每帧 `transform_matrix` 相机位姿。
+- 缺少该文件时, `eval_gs` 现在会自动关闭 `render_gs_video_path`,仅保留 `input_poses` 与 `optimised_poses` 两条渲染分支。
+- 这不会影响 GS 训练本体与最终 checkpoint / ply 结果,但会影响沿 DA3 flythrough 轨迹的那条 novel-view 评估输出。
+
+### 状态
+**目前在阶段4** - 代码与验证都已完成,正在向用户交付最终说明与影响分析。
+## [2026-03-22 01:22:38] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 继续追踪缺失 transforms 是否可由现有场景数据重建
+
+### 已观察到的现象
+- 用户怀疑缺失的 `0000_extend_transforms.json` 对应的是 "Camera moves in a clockwise circular path"。
+- 本地源码已确认存在 DA3 相机轨迹生成逻辑,并且 `extend` / `wander` / `smooth` 等模式在第三方实现中有明确分支。
+
+### 当前主假设
+- 主假设: 可以基于现有 scene 数据和 DA3 的轨迹生成逻辑,在不重跑完整预处理的前提下补生成一个兼容 `eval_gs` 的 transforms 文件。
+- 备选解释: `extend` 轨迹依赖 DA3 推理阶段的中间状态,不能仅靠现有 root 中的最终产物无损复刻。
+
+### 下一步行动
+- [ ] 阅读 DA3 的 `camera_trj_helpers.py` 与 `gs_renderer.py`,确认 `extend` / `wander` 的真实轨迹几何含义。
+- [ ] 检查当前 scene root 是否具备反推该轨迹所需的位姿和内参。
+- [ ] 若证据充分,直接生成缺失的 transforms JSON 并做最小验证。
+
+### 状态
+**目前在阶段4** - 正在验证是否能安全补生成 `gs_video/0000_extend_transforms.json`。
+## [2026-03-22 01:26:11] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 已补生成缺失的 `0000_extend_transforms.json` 并完成动态验证
+
+### 已完成事项
+- [x] 阅读 DA3 的 `camera_trj_helpers.py` 与 `gs_renderer.py`,确认 `extend` / `wander` 的真实轨迹几何含义。
+- [x] 检查当前 scene root 是否具备反推该轨迹所需的位姿和内参。
+- [x] 基于 `exports/npz/results.npz` 补生成 `gs_video/0000_extend_transforms.json`。
+- [x] 用 `load_nerf_transforms_json()` 和 `eval_gs --config.max-frames 3` 验证新文件可被评估链路直接使用。
+
+### 当前结论
+- `0000_extend_transforms.json` 已成功生成并落盘:
+  - `/tmp/video_to_world_joint_scene_xhc_bai_fast_run_full_default_20260321_2238/gs_video/0000_extend_transforms.json`
+- 它对应的是 DA3 `extend` 长轨迹,不是单独的纯 circular `wander` 文件。
+- 动态验证结果:
+  - `eval_gs` 已打印 `Loaded 3 gs_video camera poses from: .../0000_extend_transforms.json`
+  - 成功输出 `render_gs_video.mp4`
+
+### 状态
+**目前在阶段4** - 补生成与验证已完成,正在向用户交付结果与差异说明。

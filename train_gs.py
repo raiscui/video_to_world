@@ -7,11 +7,12 @@ The ``--config.renderer`` flag selects between 2DGS and 3DGS backends.
 
 from __future__ import annotations
 
+import gc
 import json
 import os
-from typing import TYPE_CHECKING
 import subprocess
 import sys
+from typing import TYPE_CHECKING
 
 import cv2
 import numpy as np
@@ -542,6 +543,38 @@ def main(config: GSConfig):
     # 9. Optional automatic evaluation
     # ------------------------------------------------------------------
     if config.auto_eval:
+        # 在拉起独立评估子进程前,先尽量释放父训练进程仍持有的 GPU 大对象。
+        # 否则子进程会和父进程争抢显存,对大场景很容易直接 OOM。
+        del model
+        del optimizer
+        del scheduler
+        del lpips_fn
+        del gt_images
+        del intrinsics_list
+        del canonical_pts
+        del canonical_cols
+        del pcls
+        del images
+        del valid_pixel_indices
+        del per_frame_global_deform
+        del per_frame_local_deform
+        del inverse_deform_net
+        del param_groups
+        del final_pts
+        del final_cols
+        del pcd
+        if "render_result" in locals():
+            del render_result
+        if "frame_indices" in locals():
+            del frame_indices
+        if "total_loss" in locals():
+            del total_loss
+        if "sh_reg_loss" in locals():
+            del sh_reg_loss
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
         cmd = [
             sys.executable,
             "-m",

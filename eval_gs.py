@@ -158,13 +158,25 @@ def _build_model(
     return model
 
 
+def _resolve_transforms_path(config: EvalGSConfig) -> None:
+    """Resolve the optional gs_video transforms path and disable it when the asset is absent."""
+    if config.transforms_path is None:
+        config.transforms_path = os.path.join(config.root_path, "gs_video", "0000_extend_transforms.json")
+
+    if config.render_gs_video_path and not os.path.isfile(config.transforms_path):
+        print(
+            f"[WARN] gs_video transforms not found: {config.transforms_path}. "
+            "Falling back to input/optimised pose rendering only."
+        )
+        config.render_gs_video_path = False
+
+
 @torch.no_grad()
 def main(config: EvalGSConfig):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
-    if config.transforms_path is None:
-        config.transforms_path = os.path.join(config.root_path, "gs_video", "0000_extend_transforms.json")
+    _resolve_transforms_path(config)
 
     if config.out_dir is None:
         config.out_dir = os.path.join(config.checkpoint_dir, "gs_video_eval")
@@ -234,7 +246,8 @@ def main(config: EvalGSConfig):
                     use_original_images_and_intrinsics=False,
                 )
                 h, w = int(images_da3.shape[2]), int(images_da3.shape[3])
-                intrinsics_gs = intrinsics_da3.repeat(intrinsics_gs.shape[0], 1, 1)
+                if intrinsics_gs is not None:
+                    intrinsics_gs = intrinsics_da3.repeat(intrinsics_gs.shape[0], 1, 1)
         except Exception:
             raise ValueError(
                 "Could not determine rendering resolution. "

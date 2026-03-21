@@ -245,3 +245,52 @@
 ### 总结感悟
 - 对“先跑通测试链路”这类任务,把外部大权重下载从主路径上摘掉,往往比盲等更有价值。
 - 这次最关键的不是单纯“降配”,而是先用真实运行证明 Stage 0/1/3.1 已经可靠,再有针对性地把 Stage 3.2 改成可验证的短程路径。
+
+## [2026-03-22 00:16:43] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] 任务名称: 继续 `source/flashvsr_reference_xhc_bai` 的默认后半程测试运行并修复真实阻塞
+
+### 任务内容
+- 基于已经跑通的默认 RoMa Stage 1 结果,继续验证默认后半程。
+- 处理运行中真实暴露的 GS 配置覆盖问题与 auto eval 问题。
+- 让 `run_reconstruction.py` 的入口级 smoke 能无 error 收尾。
+
+### 完成过程
+- 先真实执行 `run_reconstruction.py --config.skip-alignment`,确认 Stage 2 inverse deformation 和 round-trip validation 都能正常完成,默认 LPIPS 的 GS 训练也确实能启动。
+- 然后发现 `--config.gs.num-iters 150` 没生效,通过 dry-run + 静态读码确认是 `run_reconstruction.py` 的 mode preset 把用户显式覆盖写回了 10000。
+- 接着修复 `run_reconstruction.py`,新增 `tests/test_run_reconstruction.py`,并用 dry-run 证明最终下发命令已变成 `--config.num-iters 150`。
+- 再做 150 iter 的真实 GS smoke,拿到了 checkpoint / model / ply 等落盘证据,同时暴露 `eval_gs` 对缺失 `gs_video` transforms 的硬依赖。
+- 继续修复 `eval_gs` 的降级路径,新增 `tests/test_eval_gs.py`,并手动在真实 checkpoint 上跑通 `eval_gs`。
+- 最后发现 `train_gs` 的 auto eval 会被父训练进程残留显存挤爆,于是补上 auto eval 前的显存释放。
+- 重新执行 1 iter 的入口级 `run_reconstruction.py` smoke,确认训练保存、PLY 导出、自动评估和 pipeline 收尾都完成,日志中没有新的 error 标记。
+
+### 总结感悟
+- 对 GPU 管线来说, “主流程能训练” 和 “主流程末尾还能安全拉起 GPU 子流程” 是两件事, 两者都要单独验证。
+- 配置预设如果要保留,必须明确区分“mode 默认值”和“用户显式覆盖值”, 否则入口参数看起来存在,实际上会被吞掉。
+## [2026-03-22 00:25:40] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] 任务名称: 说明 eval_gs 的 transforms 依赖与自动降级影响
+
+### 任务内容
+- 核对 `README.md`、`eval_gs.py`、`configs/eval_gs.py`、`data/data_loading.py`、`preprocess_video.py`、DA3 导出补丁与第三方导出实现。
+- 解释 `gs_video/0000_extend_transforms.json` 的定义、生成来源、命名规则与缺失时的运行语义。
+
+### 完成过程
+- 确认该文件是 DA3 `gs_video` 导出阶段同步写出的 NeRF-style transforms JSON,用于复现 flythrough 相机轨迹。
+- 确认当前 `eval_gs` 缺少该文件时会自动关闭 `render_gs_video_path`,并继续渲染 `input_poses` / `optimised_poses`。
+- 确认影响范围只在评估渲染覆盖,不影响 GS 训练本体与最终模型落盘。
+
+### 总结感悟
+- 这类“自动降级”要区分“避免流程失败”和“功能完全等价”,两者不是一回事。
+- 对用户解释时必须明确分开“训练结果是否受影响”和“评估产物是否变少”这两个维度。
+## [2026-03-22 01:26:11] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] 任务名称: 补生成 `gs_video/0000_extend_transforms.json` 并验证可用于 `eval_gs`
+
+### 任务内容
+- 判断缺失的 `0000_extend_transforms.json` 是否可以从现有 scene 数据反推生成。
+- 生成兼容 `eval_gs` 的 transforms 文件,并确认评估链路能直接使用。
+
+### 完成过程
+- 先阅读 DA3 的轨迹生成源码,确认 `extend` 真实逻辑是“插值 + 平滑 + 中段插入 wander / dolly_zoom”,而不是单纯 circular path。
+- 再检查当前 `results.npz`,确认其中已有 600 帧 `extrinsics` / `intrinsics` 与渲染分辨率,足够重建轨迹。
+- 然后用一段临时 Python 脚本复用 DA3 的轨迹辅助函数,在 `/tmp/.../gs_video/0000_extend_transforms.json` 写出 722 帧的 NeRF-style transforms。
+- 最后先用 `load_nerf_transforms_json()` 成功载入,再让 `eval_gs` 只跑 `gs_video` 前 3 帧 smoke,成功生成 `render_gs_video.mp4`。
+
+### 总结感悟
+- 这次最关键的不是“手工造一个看起来像的轨迹”,而是尽量复用上游真实轨迹生成逻辑,把坐标系和插值规则保持一致。
+- `extend` 和 `wander` 在视觉上可能都像“绕着场景动”,但语义不同。文件名缺的是 `extend`,就应该按 `extend` 补,不能凭印象用纯 circular path 替代。

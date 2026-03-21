@@ -1028,3 +1028,90 @@
 ### 已验证结论
 - “先用独立进程补齐剩余 RoMa cache,再让主流程只读 cache” 这条路线已经被真实 Stage 1 证明可行。
 - 当前默认 RoMa 路径不需要再关闭功能或降 `roma_num_samples`,也能真实完成 Stage 1。
+
+## [2026-03-22 00:16:43] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] 笔记: 默认后半程测试运行的两个真实阻塞已修复并完成入口级验证
+
+## 来源
+
+### 来源1: `run_reconstruction.py` 的 dry-run 与真实运行日志
+- `run_reconstruction.py --config.gs.num-iters 150 --config.dry-run` 现在真实打印:
+  - `--config.num-iters 150`
+- 最终无 error 的入口级日志:
+  - `/tmp/video_to_world_xhc_bai_run_reconstruction_postoomfix_20260322_001016.log`
+
+### 来源2: 真实 GS smoke 产物
+- 1 iter 入口级 smoke 成功目录:
+  - `/tmp/video_to_world_joint_scene_xhc_bai_fast_run_full_default_20260321_2238/frame_to_model_icp_50_2_offset0_allcache_20260321_2334/gs_3dgs_lpips_postoomfix_20260322_001016`
+- 关键产物:
+  - `checkpoint_000000.pt`
+  - `model_final.pt`
+  - `splats_3dgs.ply`
+  - `gs_video_eval/render_input_poses.mp4`
+
+### 来源3: 静态代码阅读
+- `run_reconstruction.py` 之前把 GS 轮数写成:
+  - `num_iters=gs_iters_by_renderer.get(renderer, gs_cfg_base.num_iters)`
+- `eval_gs.py` 之前默认强依赖:
+  - `<root_path>/gs_video/0000_extend_transforms.json`
+- `train_gs.py` 之前在 `subprocess.run(eval_gs)` 前没有任何显存释放动作
+
+## 综合发现
+
+### 现象 -> 结论 1
+- 现象:
+  - 明确传入 `--config.gs.num-iters 150`, 真实日志却仍进入 `GS training (3dgs): ... /10000`
+- 已验证结论:
+  - 根因是 `run_reconstruction.py` 的 fast/extensive mode 预设无条件覆盖了用户显式传入的 `gs.num_iters`
+  - 现已修成“只有当用户没覆盖时才套 mode 默认值”
+
+### 现象 -> 结论 2
+- 现象:
+  - joint scene root 没有 `gs_video/0000_extend_transforms.json`, `eval_gs` 会直接 `FileNotFoundError`
+- 已验证结论:
+  - 这不是 GS 训练失败,而是 `eval_gs` 对可选资产缺失时缺少降级策略
+  - 现已修成: 缺失 `gs_video` transforms 时自动降级为只渲染 input / optimised poses
+
+### 现象 -> 结论 3
+- 现象:
+  - 手动单独运行 `eval_gs` 成功
+  - 但 `train_gs` 内 auto eval 会 OOM, 报错显示父训练进程仍占约 `24.87 GiB` 显存
+- 已验证结论:
+  - 根因是父训练进程在拉起 GPU 评估子进程前,没有先释放自己的 CUDA 大对象
+  - 现已修成: `train_gs` 在 auto eval 前显式 `del` 大对象 + `gc.collect()` + `torch.cuda.empty_cache()`
+
+### 最终验证结论
+- 默认 Stage 1: 已真实跑通
+- 默认后半程: 已证明能进入 Stage 2 和默认 LPIPS 的 Stage 3.2
+- 修复后入口级 smoke: 已通过, 且最终日志中:
+  - `Automatic eval failed` = 0
+  - `Traceback` = 0
+  - `[ERROR]` = 0
+## [2026-03-22 01:26:11] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] 笔记: 缺失 `0000_extend_transforms.json` 的可重建性验证
+
+## 来源
+
+### 来源1: `third_party/depth-anything-3/src/depth_anything_3/model/utils/gs_renderer.py`
+- 要点:
+  - `extend` 不是单纯 circular / wander 轨迹。
+  - 真实逻辑是: 先对多帧输入相机做插值,再平滑,最后在中段插入 `wander` 和 `dolly_zoom` 两段轨迹。
+
+### 来源2: `third_party/depth-anything-3/src/depth_anything_3/utils/camera_trj_helpers.py`
+- 要点:
+  - `render_wander_path()` 生成的是围绕参考位姿的周期性偏移轨迹。
+  - `render_dolly_zoom_path()` 会沿相机 Z 方向推进,同时缩放焦距。
+
+### 来源3: 当前 scene `exports/npz/results.npz`
+- 要点:
+  - 包含 `extrinsics: (600, 3, 4)`、`intrinsics: (600, 3, 3)`、`depth: (600, 280, 504)`。
+  - 这些数据足够在不重跑 DA3 的前提下重建 `extend` 轨迹。
+
+## 综合发现
+
+### 结论
+- 用户口中的 "Camera moves in a clockwise circular path" 更接近 `wander` 的视觉效果,但当前缺失文件名是 `0000_extend_transforms.json`,它对应的是 DA3 的 `extend` 长轨迹。
+- 该轨迹可以直接基于当前 `results.npz` 里的位姿和内参重建,不依赖 GS 模型本体。
+- 本轮已生成:
+  - `/tmp/video_to_world_joint_scene_xhc_bai_fast_run_full_default_20260321_2238/gs_video/0000_extend_transforms.json`
+- 生成结果已通过两类动态验证:
+  - `load_nerf_transforms_json()` 成功载入 `(722, 4, 4)` 轨迹
+  - `eval_gs` 使用该文件成功渲染 3 帧 `gs_video` 并输出 `render_gs_video.mp4`

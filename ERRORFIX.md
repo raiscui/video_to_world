@@ -371,3 +371,62 @@
   - Stage 1 真实产物落盘
   - Stage 3.1 真实产物落盘
   - Stage 3.2 的短程 3DGS 训练、内置评估、最终模型保存和 PLY 导出
+
+## [2026-03-22 00:16:43] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] 问题: 默认后半程测试运行中的 GS 参数覆盖与 auto eval 连续阻塞
+
+### 现象
+- 传入 `--config.gs.num-iters 150` 后,真实日志仍进入 `GS training (3dgs): ... /10000`。
+- 修复该问题并完成 150 iter 训练后, `eval_gs` 因缺少 `gs_video/0000_extend_transforms.json` 报 `FileNotFoundError`。
+- 修复 transforms 路径后, `train_gs` 内 auto eval 又因 CUDA OOM 失败,但手动独立运行 `eval_gs` 可以成功。
+
+### 假设
+- 主假设1:
+  - `run_reconstruction.py` 的 mode preset 覆盖了 CLI 显式传入的 GS 轮数字段。
+- 主假设2:
+  - `eval_gs` 对 joint scene 缺少 `gs_video` transforms 时没有降级路径。
+- 主假设3:
+  - `train_gs` 在 auto eval 前没有释放父进程显存,导致子进程评估 OOM。
+
+### 验证
+- 静态证据:
+  - `run_reconstruction.py` 旧代码存在:
+    - `num_iters=gs_iters_by_renderer.get(renderer, gs_cfg_base.num_iters)`
+  - `eval_gs.py` 默认把 transforms 路径写死到:
+    - `<root_path>/gs_video/0000_extend_transforms.json`
+  - `train_gs.py` 在 `subprocess.run(eval_gs)` 前没有任何 `gc.collect()` 或 `torch.cuda.empty_cache()`
+- 动态证据:
+  - dry-run 旧行为确实把 150 覆盖回 10000
+  - 150 iter 真实 GS smoke 已落盘 checkpoint / model / ply,说明训练本体正常
+  - 手动独立 `eval_gs` 可成功,而 auto eval 的 OOM 日志明确显示父进程仍占约 `24.87 GiB` 显存
+  - 最终入口级日志 `/tmp/video_to_world_xhc_bai_run_reconstruction_postoomfix_20260322_001016.log` 中:
+    - `Automatic eval failed` = 0
+    - `Traceback` = 0
+    - `[ERROR]` = 0
+
+### 原因
+- 已验证结论:
+  - GS 轮数被 mode preset 无条件覆盖,导致 CLI 显式值失效。
+  - `eval_gs` 把 `gs_video` transforms 当成硬前置,不适配当前 joint scene。
+  - `train_gs` 父训练进程在启动 GPU 子评估进程前未释放 CUDA 大对象,造成跨进程显存竞争。
+
+### 修复 / 处置
+- `run_reconstruction.py`
+  - 改成仅在 `gs_cfg_base.num_iters` 仍等于默认值时,才注入 mode preset 的 `num_iters`。
+- `eval_gs.py`
+  - 新增 `_resolve_transforms_path()`
+  - 缺失 `gs_video` transforms 时自动关闭 `render_gs_video_path`,降级为 input / optimised pose 渲染
+  - 顺手补齐 `intrinsics_gs is not None` 的保护
+- `train_gs.py`
+  - 在 auto eval 前显式 `del` 训练期大对象
+  - 增加 `gc.collect()` 与 `torch.cuda.empty_cache()`
+- 新增回归测试:
+  - `tests/test_run_reconstruction.py`
+  - `tests/test_eval_gs.py`
+
+### 验证结果
+- 通过:
+  - `python3 -m py_compile run_reconstruction.py train_gs.py eval_gs.py tests/test_run_reconstruction.py tests/test_eval_gs.py`
+  - `timeout 300s pixi run python -m unittest tests.test_run_reconstruction tests.test_eval_gs tests.test_roma_memory_offload`
+  - `run_reconstruction.py --config.dry-run` 已真实打印 `--config.num-iters 150`
+  - 手动 `eval_gs` 已在真实 checkpoint 上跑通
+  - 1 iter 入口级 smoke 已在最终日志中消除 auto eval error
