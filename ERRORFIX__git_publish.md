@@ -36,3 +36,36 @@
 - `pixi run test` 通过。
 - `pixi run ruff check .` 通过。
 - `git push origin main` 已在去代理环境下成功完成。
+
+## [2026-03-22 02:00:30] [Session ID: 2479889] 问题: 最后一次发布时,去代理后的 HTTPS push 仍被 HTTP/2 传输错误打断
+
+### 现象
+- 在已经去掉 `127.0.0.1:7897` 代理的前提下,`git push origin main` 失败。
+- 报错为: `Error in the HTTP2 framing layer`。
+- 同一时刻,`git ls-remote origin refs/heads/main` 仍然可以成功访问远程。
+
+### 假设
+- 主假设:
+  - 这是 GitHub HTTPS 连接上的瞬时 HTTP/2 传输问题。
+- 备选解释:
+  - 也可能是本地网络对 HTTP/2 的某些连接复用或 framing 处理不稳定。
+
+### 验证
+- 动态证据:
+  - 去代理环境下 `git ls-remote origin refs/heads/main` 成功,返回旧远程头 `465421d...`。
+  - 仅对本次 push 增加 `-c http.version=HTTP/1.1` 后,`git push origin main` 成功。
+  - 随后再次 `git ls-remote origin refs/heads/main`,返回新远程头 `9ff571ce99cd5692ccc504dc550644c7c9412ab7`。
+
+### 原因
+- 已验证结论:
+  - 问题不在 Git 认证,也不在仓库权限。
+  - 首次失败点落在 HTTP/2 传输层,切换到 HTTP/1.1 即可绕过。
+
+### 修复
+- 不修改全局 Git 配置。
+- 仅在本次命令里使用:
+  - `git -c http.version=HTTP/1.1 push origin main`
+
+### 验证结果
+- 推送成功。
+- 远程 `main` 已更新到 `9ff571ce99cd5692ccc504dc550644c7c9412ab7`。
