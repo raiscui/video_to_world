@@ -827,3 +827,13 @@
 
 ### 状态
 **目前仍在阶段3** - 已确认 GS 轮数覆盖未生效, 正在做最小静态验证。
+
+## [2026-03-21 23:56:16] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 修复后已启动真实 GS smoke 运行
+
+### 运行策略
+- 复用已存在的 `inverse_deformation` 输出,跳过 Stage 3.1。
+- 通过修复后的 `run_reconstruction.py` 真实下发 `--config.gs.num-iters 150`。
+- 目标是获取 checkpoint / eval / final model 等落盘证据。
+
+### 状态
+**目前仍在阶段3** - 修复后的真实 GS smoke 已启动, 正在等待 150 iter 收尾结果。
