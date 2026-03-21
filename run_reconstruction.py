@@ -412,6 +412,11 @@ def main(config: PipelineConfig) -> None:
         print(f"[PIPELINE] === Stage 3.2: {renderer.upper()} Training ===")
         # Respect explicit CLI overrides: only inject defaults if the user didn't set a value.
         default_gs = GSConfig()
+        gs_num_iters = (
+            gs_iters_by_renderer[renderer]
+            if gs_cfg_base.num_iters == default_gs.num_iters
+            else gs_cfg_base.num_iters
+        )
         gs_global_opt_subdir = (
             downstream_ckpt_subdir
             if gs_cfg_base.global_opt_subdir == default_gs.global_opt_subdir
@@ -424,7 +429,7 @@ def main(config: PipelineConfig) -> None:
             global_opt_subdir=gs_global_opt_subdir,
             inverse_deform_dir=inverse_deform_dir,
             renderer=renderer,  # type: ignore[arg-type]
-            num_iters=gs_iters_by_renderer.get(renderer, gs_cfg_base.num_iters),
+            num_iters=gs_num_iters,
         )
         # Default to using the original (preprocess) frames when available.
         # These are typically written by Stage 0 to <scene_root>/frames_subsampled and align

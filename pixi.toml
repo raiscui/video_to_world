@@ -1,0 +1,73 @@
+[workspace]
+name = "video_to_world"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[tasks]
+lint = "python -m ruff check ."
+format = "python -m ruff format ."
+test = "python -m unittest discover -s tests"
+install-torch-stack = "python -m pip install 'torch>=2' torchvision xformers"
+pin-build-setuptools = "python -m pip install 'setuptools==81.0.0'"
+install-gsplat = "bash scripts/install_gsplat.sh"
+install-tinycudann = { cmd = "bash scripts/install_tinycudann.sh", depends-on = ["pin-build-setuptools"] }
+# 这些任务依赖 `if ... then ... fi` 和参数展开,需要显式交给 bash 执行,
+# 否则会被 pixi 内置的 deno_task_shell 解析失败。
+setup-depth-anything-3 = "bash scripts/setup_depth_anything_3.sh"
+setup-romav2 = { cmd = ["bash", "-lc", """
+set -euo pipefail
+source scripts/pixi_task_helpers.sh
+clear_loopback_proxy_vars
+mkdir -p third_party
+if [ ! -d third_party/RoMaV2/.git ]; then
+  git clone https://github.com/Parskatt/RoMaV2 third_party/RoMaV2
+fi
+if git -C third_party/RoMaV2 apply --reverse --check ../../patches/romav2-dataclasses.patch >/dev/null 2>&1; then
+  echo "RoMaV2 patch already applied"
+else
+  git -C third_party/RoMaV2 apply ../../patches/romav2-dataclasses.patch
+fi
+python -m pip install -e "third_party/RoMaV2[fused-local-corr]"
+"""] }
+setup = { depends-on = ["install-torch-stack", "setup-depth-anything-3", "install-gsplat", "install-tinycudann", "setup-romav2"] }
+install-torch-kdtree = { cmd = ["bash", "-lc", """
+set -euo pipefail
+source scripts/pixi_task_helpers.sh
+clear_loopback_proxy_vars
+if [ -z "${CUDA_HOME:-}" ]; then
+  echo "CUDA_HOME is not set. Please export CUDA_HOME=/usr/local/cuda first." >&2
+  exit 1
+fi
+mkdir -p third_party
+if [ ! -d third_party/torch_kdtree/.git ]; then
+  git clone https://github.com/thomgrand/torch_kdtree third_party/torch_kdtree
+fi
+git -C third_party/torch_kdtree submodule update --init --recursive
+python -m pip install -U cmake ninja
+CPLUS_INCLUDE_PATH="$CUDA_HOME/include:${CPLUS_INCLUDE_PATH:-}" python -m pip install third_party/torch_kdtree --no-build-isolation
+"""] }
+
+[dependencies]
+python = "3.10.*"
+pip = "*"
+git = "*"
+ffmpeg = "*"
+cmake = "*"
+ninja = "*"
+
+[pypi-dependencies]
+numpy = "<2"
+opencv-python = "<4.12"
+open3d = "*"
+scipy = "*"
+socksio = "*"
+tyro = "*"
+tqdm = "*"
+tensorboard = "*"
+lpips = "*"
+viser = "*"
+nerfview = "*"
+romatch = "*"
+plyfile = "*"
+pillow = "*"
+ruff = "*"

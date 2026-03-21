@@ -22,80 +22,100 @@ If you find World Reconstruction From Inconsistent Views useful for your work pl
 
 ## Prepare Environment
 
-Clone this repository and create the conda environment:
+Install [pixi](https://pixi.sh/latest/) first, then clone this repository and install the base environment:
 
 ```bash
 git clone --branch main --single-branch https://github.com/lukasHoel/video_to_world
 cd video_to_world
 
-conda create -n video_to_world python=3.10
-conda activate video_to_world
-
-# Keep DA3-compatible numpy/opencv versions (numpy<2; opencv<4.12)
-pip install "numpy<2" "opencv-python<4.12"
+pixi install
 ```
 
-First, set up [DepthAnything-3](https://github.com/ByteDance-Seed/depth-anything-3):
+Install the project-specific GPU and source-built dependencies:
 
 ```bash
-mkdir -p third_party
-
-# Clone DA3
-git clone https://github.com/ByteDance-Seed/depth-anything-3 third_party/depth-anything-3
-git -C third_party/depth-anything-3 checkout 2c21ea849ceec7b469a3e62ea0c0e270afc3281a
-
-# Install DA3 + deps (minimal set for npz + gs_video)
-pip install xformers torch\>=2 torchvision
-pip install -e third_party/depth-anything-3
-
-# Apply the trajectory-export patch
-git -C third_party/depth-anything-3 apply ../../patches/da3-export-trajectory.patch
+pixi run setup
 ```
 
-Install `gsplat`:
+This task will:
+
+- install the PyTorch stack (`torch`, `torchvision`, `xformers`)
+- clone and patch [DepthAnything-3](https://github.com/ByteDance-Seed/depth-anything-3)
+- install `gsplat`
+- clone [tiny-cuda-nn](https://github.com/NVlabs/tiny-cuda-nn), initialize its submodules, and install the local torch bindings with `--no-build-isolation`
+- clone, patch, and install RoMaV2 from source
+
+If `pixi run install-gsplat` stalls or fails while updating `gsplat/cuda/csrc/third_party/glm`, the repository now auto-checks for usable local GLM headers before depending on the upstream submodule. You can also point it at a known-good local GLM tree by setting `GSPLAT_GLM_LOCAL_DIR` in `.envrc` to a directory that contains `glm/gtc/type_ptr.hpp`, then running:
 
 ```bash
-pip install --no-build-isolation \
-  "git+https://github.com/nerfstudio-project/gsplat.git@v1.5.3"
+direnv allow
+pixi run install-gsplat
 ```
 
-Install `tinycudann`:
+`pixi run install-tinycudann` now caches the tiny-cuda-nn source tree outside the repository worktree by default, using `TINYCUDANN_LOCAL_REPO` from `.envrc` (default: `/tmp/video_to_world-tiny-cuda-nn`). It also fills `cmrc`, `cutlass`, and `fmt` from GitHub tarballs pinned to the superproject's recorded commits, storing those archives in `TINYCUDANN_ARCHIVE_CACHE_DIR` (default: `/tmp/video_to_world-tinycudann-archives`) so repeated retries can resume instead of restarting from zero.
 
-```bash
-pip install setuptools==81.0.0
-pip install "git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch" --no-build-isolation
-```
+If your machine reaches GitHub through a working local proxy such as `127.0.0.1:7890`, set the usual `http_proxy` / `https_proxy` / `all_proxy` variables and also flip `PIXI_KEEP_LOOPBACK_PROXY=1` in `.envrc` before running `pixi run setup`. Otherwise the helper scripts will keep treating loopback proxies as stale and clear them.
 
-Then install the remaining dependencies:
-
-```bash
-pip install open3d scipy tyro tqdm tensorboard
-pip install lpips viser nerfview romatch
-```
-
-Install RoMaV2 (patched to avoid a `dataclasses>=0.8` dependency-resolution issue, see [Parskatt/RoMaV2#26](https://github.com/Parskatt/RoMaV2/issues/26)):
-
-```bash
-# Clone RoMaV2
-git clone https://github.com/Parskatt/RoMaV2 third_party/RoMaV2
-
-# Patch dependency metadata (dataclasses>=0.8 -> dataclasses)
-git -C third_party/RoMaV2 apply ../../patches/romav2-dataclasses.patch
-
-# Install (optionally add `fused-local-corr` for the fused local correlation kernel)
-pip install -e "third_party/RoMaV2[fused-local-corr]"
-```
+The base `pixi` environment now includes `socksio`, so Python tooling that uses `httpx` or `huggingface_hub` can also honor `all_proxy=socks5://...` without failing early on `ImportError: Using SOCKS proxy, but the 'socksio' package is not installed`.
 
 Optionally, install [torch_kdtree](https://github.com/thomgrand/torch_kdtree) for GPU-accelerated KD-tree nearest-neighbor queries:
 
 ```bash
-export CUDA_HOME=/usr/local/cuda # point to a local installation of a corresponding cuda toolkit version
-git clone https://github.com/thomgrand/torch_kdtree third_party/torch_kdtree
-cd third_party/torch_kdtree
-git submodule init && git submodule update
-pip install -U cmake ninja
-CPLUS_INCLUDE_PATH="$CUDA_HOME/include:${CPLUS_INCLUDE_PATH:-}" PATH="$CONDA_PREFIX/bin:$PATH" python -m pip install . --no-build-isolation
-cd ../..
+export CUDA_HOME=/usr/local/cuda # point to a local installation of a matching CUDA toolkit
+pixi run install-torch-kdtree
+```
+
+Enter the environment for the rest of the commands in this README:
+
+```bash
+pixi shell
+```
+
+If you prefer not to open a shell, prefix commands with `pixi run`, e.g. `pixi run python run_reconstruction.py --config.input-video /path/to/video.mp4`.
+
+## Joint Multi-View Input
+
+For folders that contain multiple views of the same scene, such as:
+
+```text
+source/flashvsr_reference_xhc_bai/full_scale2x/
+  0/rgb/xhc-bai_97e474c6.mp4
+  1/rgb/xhc-bai_97e474c6.mp4
+  ...
+  5/rgb/xhc-bai_97e474c6.mp4
+```
+
+use the joint multiview entry point:
+
+```bash
+python run_multiview_reconstruction.py \
+  --views-root source/flashvsr_reference_xhc_bai/full_scale2x \
+  --config.mode fast
+```
+
+The joint script will:
+
+- scan numeric view folders such as `0..5`
+- preprocess each view independently with DA3 into `<scene_root>/per_view/view_<id>/`
+- merge all per-view `results.npz` files into one shared `<scene_root>/exports/npz/results.npz`
+- merge all `frames_subsampled` images into one shared `<scene_root>/frames_subsampled/`
+- run Stage 1/2/3 once on that shared `scene_root`
+- write a summary JSON at `<scene_root>/multiview_reconstruction_summary.json`
+
+Useful examples:
+
+```bash
+# Only use views 0, 1, and 2 for the joint scene
+python run_multiview_reconstruction.py \
+  --views-root source/flashvsr_reference_xhc_bai/full_scale2x \
+  --view-ids 0,1,2 \
+  --config.mode fast
+
+# Preview the joint preprocess + reconstruction commands without executing them
+python run_multiview_reconstruction.py \
+  --views-root source/flashvsr_reference_xhc_bai/full_scale2x \
+  --dry-run \
+  --config.mode fast
 ```
 
 ## Quickstart
@@ -274,4 +294,3 @@ Our work builds on top of amazing open-source projects. We thank the authors for
 - [gsplat](https://github.com/nerfstudio-project/gsplat): Gaussian splatting rasterizer used for 2DGS/3DGS training and rendering.
 - [tiny-cuda-nn](https://github.com/NVlabs/tiny-cuda-nn): hash-grid encodings used by the deformation networks.
 - [torch_kdtree](https://github.com/thomgrand/torch_kdtree): optional GPU-accelerated KD-tree for nearest-neighbor queries.
-

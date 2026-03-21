@@ -48,6 +48,7 @@ def compute_correspondence_loss_with_model_segments(
         num_matches: number of matches used (after filtering)
     """
     device = src_points_transformed.device
+    src_valid_pixel_indices = src_valid_pixel_indices.to(device)
 
     if not matches_data:
         z = torch.tensor(0.0, device=device)
@@ -71,15 +72,15 @@ def compute_correspondence_loss_with_model_segments(
         start_idx, end_idx = model_frame_segments[segment_idx]
 
         ref_points = model_points[start_idx:end_idx]
-        ref_valid_indices = model_valid_pixel_indices_list[segment_idx]
+        ref_valid_indices = model_valid_pixel_indices_list[segment_idx].to(device)
 
         ref_colors = None
         if model_colors is not None:
             ref_colors = model_colors[start_idx:end_idx]
 
-        kpts_src = getattr(match_data, "kpts_src")
-        kpts_ref = getattr(match_data, "kpts_ref")
-        weights = getattr(match_data, "certainty")
+        kpts_src = getattr(match_data, "kpts_src").to(device)
+        kpts_ref = getattr(match_data, "kpts_ref").to(device)
+        weights = getattr(match_data, "certainty").to(device)
 
         src_local_idx, src_valid_mask = get_local_indices_for_pixels_batch(
             pixels_x=kpts_src[:, 0],

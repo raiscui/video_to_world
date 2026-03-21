@@ -476,9 +476,6 @@ def non_rigid_icp(
             diff = src_used - tgt_used
             rmse_v2 = torch.sqrt((diff * diff).sum(dim=1).mean())
             rmse = rmse_v2
-            roma_loss_val = loss_roma.item() if isinstance(loss_roma, torch.Tensor) else loss_roma
-            color_icp_val = loss_color_icp.item() if isinstance(loss_color_icp, torch.Tensor) else float(loss_color_icp)
-
             # Optional per-iteration timing breakdown (for tb summary).
             if (
                 t_iter_start is not None

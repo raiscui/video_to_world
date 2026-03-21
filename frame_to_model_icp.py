@@ -51,6 +51,21 @@ _PBAR_POSTFIX_MIN_SECONDS = 0.2
 _PBAR_POSTFIX_MIN_ITERS = 10
 
 
+def _log_cuda_memory(stage: str, frame_idx: int) -> None:
+    """记录关键阶段的 CUDA 显存快照."""
+    if not torch.cuda.is_available():
+        return
+    allocated = torch.cuda.memory_allocated() / 1024**3
+    reserved = torch.cuda.memory_reserved() / 1024**3
+    logger.info(
+        "[CUDA][Frame %d][%s] allocated=%.2f GiB reserved=%.2f GiB",
+        frame_idx,
+        stage,
+        allocated,
+        reserved,
+    )
+
+
 class ICPLossTracker:
     """Accumulates per-frame ICP loss statistics for adaptive point filtering.
 
@@ -260,17 +275,30 @@ def main(config: FrameToModelICPConfig):
     match_history = None
     roma_cache_path = None
     cached_roma_matches = None
-    if use_roma_matching:
+
+    def _create_roma_matcher() -> RoMaMatcherWrapper:
+        """创建一个新的 RoMa matcher 实例.
+
+        说明:
+        - 这里故意封装成小函数,方便在长序列里按需重建 matcher。
+        - 当前针对 RoMaV2 的动态探针显示,同一个 matcher 连续处理多帧新 pair 时,
+          显存会跨帧累积。按帧重建能把这部分生命周期截断在当前帧内。
+        """
         logger.info(
             "Initializing RoMa matcher (version=%s, model=%s)...",
             config.roma.roma_version,
             config.roma.roma_model,
         )
-        roma_matcher = RoMaMatcherWrapper(
+        matcher = RoMaMatcherWrapper(
             device=device,
             model_type=config.roma.roma_model,
             version=config.roma.roma_version,
         )
+        logger.info("RoMa matcher initialized successfully")
+        return matcher
+
+    if use_roma_matching:
+        roma_matcher = _create_roma_matcher()
         match_history = MatchHistory()
 
         # Set up caching
@@ -285,12 +313,9 @@ def main(config: FrameToModelICPConfig):
             reference_selection_mode=config.roma.roma_reference_sampling,
         )
         roma_cache_path = _get_cache_path(config.root_path, cache_key)
-        cached_roma_matches = load_cached_matches(roma_cache_path, device=device)
+        cached_roma_matches = load_cached_matches(roma_cache_path, device="cpu")
         if cached_roma_matches:
             logger.info(f"Loaded {len(cached_roma_matches)} cached ROMA match pairs from {roma_cache_path}")
-
-        logger.info("RoMa matcher initialized successfully")
-
     # Run Non-Rigid ICP iteratively
     # save downsampled merge of all pcls
     merged = merge_point_clouds(pcls)
@@ -324,7 +349,7 @@ def main(config: FrameToModelICPConfig):
     def dummy_deform(x: torch.Tensor) -> torch.Tensor:
         return torch.zeros((x.shape[0], 6), device=x.device, dtype=torch.float32)
 
-    per_frame_global_deform = [per_frame_c2w_se3[0].clone()]  # c2w_0 (frozen)
+    per_frame_global_deform = [per_frame_c2w_se3[0].clone().cpu()]  # c2w_0 (frozen)
     per_frame_local_deform = [dummy_deform]
     ref_frame_indexes = [0]
 
@@ -333,7 +358,7 @@ def main(config: FrameToModelICPConfig):
     model_frame_segments = [(0, model.shape[0])]  # First frame is the initial model
     # Track valid pixel indices for each frame's segment in the model
     # These get updated when merge_new_points_with_model filters out points
-    model_valid_pixel_indices_list = [valid_pixel_indices[0].clone()] if valid_pixel_indices else []
+    model_valid_pixel_indices_list = [valid_pixel_indices[0].clone().cpu()] if valid_pixel_indices else []
 
     if tb_writer is not None:
         tb_writer.add_scalar("model/num_points_after_merge", float(model.shape[0]), 0)
@@ -510,8 +535,14 @@ def main(config: FrameToModelICPConfig):
         # --------------------------------------------------------------
         t_roma_start = time.perf_counter()
         roma_matches_for_frame = None
+        if i >= 15:
+            _log_cuda_memory("before_roma", i)
         if roma_matcher is not None and match_history is not None:
             frames_pbar.set_postfix_str("RoMa matching...")
+
+            if torch.cuda.is_available():
+                # RoMa 前主动归还一轮可释放缓存,避免上一轮 ICP 的 allocator 残留把新匹配挤爆。
+                torch.cuda.empty_cache()
 
             # Compute/load matches (returns original unfiltered matches)
             roma_matches_for_frame = compute_roma_matches_for_frame(
@@ -558,7 +589,24 @@ def main(config: FrameToModelICPConfig):
                     tb_writer.add_scalar("roma/total_matches", 0.0, i)
                     tb_writer.add_scalar("roma/num_pairs", 0.0, i)
 
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            if (
+                roma_matcher is not None
+                and config.roma.roma_version == "v2"
+                and torch.cuda.is_available()
+            ):
+                # RoMaV2 在同一个 matcher 实例里跨帧累计新 pair 时,
+                # 会持续抬高 `memory_allocated()`。
+                # 这里按帧重建 matcher,把泄漏生命周期限制在当前帧内。
+                del roma_matcher
+                torch.cuda.empty_cache()
+                roma_matcher = _create_roma_matcher()
+
         t_roma_end = time.perf_counter()
+        if i >= 15:
+            _log_cuda_memory("after_roma", i)
 
         # --------------------------------------------------------------
         # Non-rigid ICP for this frame (camera-space src, c2w init)
@@ -681,6 +729,8 @@ def main(config: FrameToModelICPConfig):
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         t_icp_end = time.perf_counter()
+        if i >= 15:
+            _log_cuda_memory("after_icp", i)
 
         if tb_writer is not None and icp_metrics.get("iters_completed", 0) > 0:
             tb_writer.add_scalar("icp_final/loss", float(icp_metrics.get("loss", 0.0)), i)
@@ -708,8 +758,8 @@ def main(config: FrameToModelICPConfig):
             )
 
         ref_frame_indexes.append(i)
-        per_frame_global_deform.append(global_deform)
-        per_frame_local_deform.append(local_deform)
+        per_frame_global_deform.append(global_deform.detach().cpu())
+        per_frame_local_deform.append(local_deform.cpu())
 
         # --------------------------------------------------------------
         # Per-point loss filtering (post-ICP, pre-merge)
@@ -838,6 +888,8 @@ def main(config: FrameToModelICPConfig):
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         t_merge_end = time.perf_counter()
+        if i >= 15:
+            _log_cuda_memory("after_merge", i)
 
         if model_kd_tree is not None:
             logger.info(
@@ -887,7 +939,12 @@ def main(config: FrameToModelICPConfig):
             else:
                 filtered_vpi = valid_pixel_indices[i]
             final_pixel_indices = filtered_vpi[merge_keep_mask]
-            model_valid_pixel_indices_list.append(final_pixel_indices)
+            model_valid_pixel_indices_list.append(final_pixel_indices.cpu())
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            if i >= 15:
+                _log_cuda_memory("after_empty_cache", i)
 
         # Model growth is controlled by only adding points in empty voxels
         # via merge_new_points_with_model (rather than downsampling the full model).

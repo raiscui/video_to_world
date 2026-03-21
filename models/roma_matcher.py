@@ -28,6 +28,16 @@ class RoMaMatchData:
     kpts_ref: torch.Tensor  # (N, 2) pixel coords in reference frame
     certainty: torch.Tensor  # (N,) RoMa certainty scores
 
+    def to(self, device: str | torch.device) -> "RoMaMatchData":
+        """返回一个迁移到目标 device 的新对象."""
+        return RoMaMatchData(
+            src_frame_idx=self.src_frame_idx,
+            ref_frame_idx=self.ref_frame_idx,
+            kpts_src=self.kpts_src.to(device),
+            kpts_ref=self.kpts_ref.to(device),
+            certainty=self.certainty.to(device),
+        )
+
 
 class RoMaMatcherWrapper:
     """
@@ -62,8 +72,8 @@ class RoMaMatcherWrapper:
             from romav2 import RoMaV2
         except ImportError:
             raise ImportError(
-                "RoMaV2 is not installed. Install with: pip install romav2\n"
-                "Or from source: pip install git+https://github.com/Parskatt/RoMaV2.git"
+                "RoMaV2 is not installed. Run `pixi run setup-romav2` from the repository root.\n"
+                "Fallback: python -m pip install git+https://github.com/Parskatt/RoMaV2.git"
             )
 
         cfg = RoMaV2.Cfg(compile=False)
@@ -79,8 +89,8 @@ class RoMaMatcherWrapper:
             import romatch
         except ImportError:
             raise ImportError(
-                "RoMa is not installed. Install with: pip install romatch\n"
-                "Or from source: pip install git+https://github.com/Parskatt/RoMa.git"
+                "RoMa is not installed. Run `pixi install` from the repository root.\n"
+                "Fallback: python -m pip install romatch"
             )
 
         # Load the appropriate model
@@ -143,18 +153,25 @@ class RoMaMatcherWrapper:
         img_a_pil = Image.fromarray(img_a_np)
         img_b_pil = Image.fromarray(img_b_np)
 
+        if self.device.startswith("cuda") and torch.cuda.is_available():
+            # 先清理上一轮 ICP / RoMa 留下的可释放缓存,减少显存碎片。
+            torch.cuda.empty_cache()
+
         # Get dense predictions from RoMaV2
         preds = self.model.match(img_a_pil, img_b_pil)
 
         # Sample matches
         # RoMaV2 sample() returns: matches, overlaps, precision_AB, precision_BA
         matches, overlaps, precision_AB, precision_BA = self.model.sample(preds, num_samples)
+        del preds, precision_AB, precision_BA
 
         # Convert to pixel coordinates
         kpts_a, kpts_b = self.model.to_pixel_coordinates(matches, H_A, W_A, H_B, W_B)
+        del matches
 
         # Use overlaps as certainty score
         certainty_sampled = overlaps
+        del overlaps
 
         # Filter by certainty threshold
         if certainty_threshold > 0:
@@ -162,6 +179,14 @@ class RoMaMatcherWrapper:
             kpts_a = kpts_a[mask]
             kpts_b = kpts_b[mask]
             certainty_sampled = certainty_sampled[mask]
+
+        # 后续匹配历史与缓存不需要常驻 GPU,这里直接下沉到 CPU.
+        kpts_a = kpts_a.detach().cpu()
+        kpts_b = kpts_b.detach().cpu()
+        certainty_sampled = certainty_sampled.detach().cpu()
+
+        if self.device.startswith("cuda") and torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         return kpts_a, kpts_b, certainty_sampled
 
@@ -186,15 +211,20 @@ class RoMaMatcherWrapper:
         img_a_pil = Image.fromarray(img_a_np)
         img_b_pil = Image.fromarray(img_b_np)
 
+        if self.device.startswith("cuda") and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
         # Get dense warp and certainty
         warp, certainty = self.model.match(img_a_pil, img_b_pil, device=self.device)
 
         # Sample matches
         matches, certainty_sampled = self.model.sample(warp, certainty, num=num_samples)
+        del warp, certainty
 
         # Convert to pixel coordinates
         # RoMa returns matches in [-1, 1] x [-1, 1] normalized coordinates
         kpts_a, kpts_b = self.model.to_pixel_coordinates(matches, H_A, W_A, H_B, W_B)
+        del matches
 
         # Filter by certainty threshold
         if certainty_threshold > 0:
@@ -202,6 +232,13 @@ class RoMaMatcherWrapper:
             kpts_a = kpts_a[mask]
             kpts_b = kpts_b[mask]
             certainty_sampled = certainty_sampled[mask]
+
+        kpts_a = kpts_a.detach().cpu()
+        kpts_b = kpts_b.detach().cpu()
+        certainty_sampled = certainty_sampled.detach().cpu()
+
+        if self.device.startswith("cuda") and torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         return kpts_a, kpts_b, certainty_sampled
 
@@ -466,7 +503,10 @@ def compute_roma_matches_for_frame(
     computed_pairs = []
     cached_pairs = []
 
-    for ref_idx in ref_frames:
+    computed_since_refresh = 0
+    refresh_every_n_new_pairs = 4
+
+    for ref_pos, ref_idx in enumerate(ref_frames):
         pair = (current_frame_idx, ref_idx)
 
         # Check cache first
@@ -495,6 +535,34 @@ def compute_roma_matches_for_frame(
             )
             matches_list.append(match_data)
             computed_pairs.append(pair)
+            computed_since_refresh += 1
+
+        if (
+            computed_since_refresh >= refresh_every_n_new_pairs
+            and ref_pos + 1 < len(ref_frames)
+            and roma_matcher.version == "v2"
+            and str(roma_matcher.device).startswith("cuda")
+            and torch.cuda.is_available()
+        ):
+            # RoMaV2 在同一 matcher 实例里连续计算多个新 pair 时,
+            # `memory_allocated()` 会明显抬升。这里按小批次重建 matcher,
+            # 把这部分累计限制在当前批次内,避免单帧内继续堆到 OOM。
+            logger.info(
+                "Frame %d: refreshing RoMa matcher after %d new pairs to cap GPU accumulation",
+                current_frame_idx,
+                computed_since_refresh,
+            )
+            refresh_device = str(roma_matcher.device)
+            refresh_model_type = roma_matcher.model_type
+            refresh_version = roma_matcher.version
+            del roma_matcher
+            torch.cuda.empty_cache()
+            roma_matcher = RoMaMatcherWrapper(
+                device=refresh_device,
+                model_type=refresh_model_type,
+                version=refresh_version,
+            )
+            computed_since_refresh = 0
 
     # Log cache usage
     if cached_matches is not None:
