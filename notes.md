@@ -583,3 +583,48 @@
 ### 当前阶段判断
 - 现在已经越过 Stage 1 和 Stage 2。
 - 当前真正运行的是 Stage 3.1,还没有切到 2DGS / 3DGS。
+
+## [2026-03-22 15:31:20] [Session ID: eab9d6c3-318b-4c00-96b4-b400f09605f6] 笔记: 当前最新进度已到 3DGS 2060/15000
+
+## 来源
+
+### 来源1: `/tmp/video_to_world_joint_scene_xhc_bai_extensive_stage123_cpu_kdtree_20260322_121430.log`
+- 要点:
+  - 已出现 `Stage 3.2: 2DGS Training`
+  - 已出现 `Stage 3.2: 3DGS Training`
+  - 最新 3DGS 迭代约为 `2060/15000`
+  - 最近一次评估为 `step 2000`, `avg PSNR = 18.94 dB`
+
+### 来源2: 进程与 GPU 探针
+- 要点:
+  - 当前 compute app 是 `train_gs --config.renderer 3dgs`
+  - GPU 利用率 `100%`
+  - 显存约 `34.4 GiB`
+
+## 综合发现
+
+### 当前阶段判断
+- 目前已经进入 3DGS 训练早期。
+- 若按当前日志节奏看,离 15000 iter 还有较长时间。
+
+## [2026-03-22 16:27:10] [Session ID: eab9d6c3-318b-4c00-96b4-b400f09605f6] 笔记: 3DGS 实时进度已推进到 5072/15000
+
+## 来源
+
+### 来源1: `/tmp/video_to_world_joint_scene_xhc_bai_extensive_stage123_cpu_kdtree_20260322_121430.log`
+- 要点:
+  - `2DGS` 已到 `15000/15000`
+  - `3DGS` 最新约为 `5072/15000`
+  - 最近一次评估为 `step 5000`, `avg PSNR = 19.37 dB`
+
+### 来源2: 进程与 GPU 探针
+- 要点:
+  - 当前 compute app 仍是 `train_gs --config.renderer 3dgs`
+  - GPU 利用率 `100%`
+  - 显存约 `34.4 GiB`
+
+## 综合发现
+
+### 当前阶段判断
+- 目前已经进入 3DGS 中前段,进度约 `33.8%`。
+- 距离 `15000 iter` 还有较长时间,但流程仍在稳定推进。

@@ -465,3 +465,25 @@
 ### 总结感悟
 - 这次失败点不在算法,而在“multiview 入口透传参数时不会提前校验旧字段名”,导致错误要等到 Stage 0 结束后才暴露。
 - 对这种长流水线任务,先做 CLI 帮助探针和缺依赖探针,能少走很多弯路。
+
+## [2026-03-22 17:38:20] [Session ID: eab9d6c3-318b-4c00-96b4-b400f09605f6] 任务名称: 核对联合场景 extensive 的最终高质量视频与 3DGS 产物
+
+### 任务内容
+- 确认这次 `output/video_to_world/joint_scene_xhc_bai` extensive 最终应查看哪个视频文件。
+- 确认最终应查看哪个 3DGS 模型文件与目录。
+
+### 完成过程
+- 读取 `frame_to_model_icp_50_8_offset0` 目录树,确认 extensive 同时产出了 `gs_2dgs` 与 `gs_3dgs`。
+- 进一步核对 `train_gs.py` 与 `eval_gs.py` 的命名规则,确认最终评估视频目录为 `gs_video_eval`,最终 3DGS 导出为 `splats_3dgs.ply`。
+- 实地核对 `gs_3dgs` 目录,确认已经存在:
+  - `model_final.pt`
+  - `checkpoint_014999.pt`
+  - `canonical_points_final.ply`
+  - `splats_3dgs.ply`
+  - `gs_video_eval/render_input_poses.mp4`
+- 再检查根场景 `gs_video/0000_extend_transforms.json`,确认仍缺失,因此本次最终视频不是 `render_gs_video.mp4`,而是 input poses 渲染视频。
+- 最后确认训练与评估子进程已经全部结束,说明最终产物已经落稳。
+
+### 总结感悟
+- extensive 模式里的 `gs_2dgs` 更像中间分支,最终高质量交付应优先看 `gs_3dgs`。
+- 视频文件名不能只凭直觉猜,必须结合 `eval_gs.py` 的 fallback 逻辑和实际落盘文件一起判断。

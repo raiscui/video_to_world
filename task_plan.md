@@ -1010,3 +1010,80 @@
 
 ### 主题
 - 核对 `CUDA_HOME` 缺失究竟是环境问题,还是 `install-torch-kdtree` 任务缺少自动探测。
+
+## [2026-03-22 12:35:40] [Session ID: eab9d6c3-318b-4c00-96b4-b400f09605f6] [记录类型]: 用户再次询问实时进度,准备刷新最新阶段状态
+
+### 当前动作计划
+- 重新检查 `run_reconstruction.py` 相关进程。
+- 读取最新日志尾部与阶段标记。
+- 结合 GPU 占用判断当前真实运行阶段,再汇报给用户。
+
+### 状态
+**目前在阶段4** - 正在刷新实时进度快照,避免沿用过期状态。
+
+## [2026-03-22 15:31:20] [Session ID: eab9d6c3-318b-4c00-96b4-b400f09605f6] [记录类型]: 当前已进入 3DGS 训练,实时进度约 2060/15000
+
+### 动态证据
+- 当前存活 compute 进程:
+  - `train_gs --config.renderer 3dgs`
+- 日志阶段头已出现:
+  - `Stage 3.2: 2DGS Training`
+  - `Stage 3.2: 3DGS Training`
+- 从日志解析出的最新 3DGS 迭代数:
+  - `2060 / 15000`
+- 最近一次 eval 结果:
+  - `step 2000`
+  - `avg PSNR = 18.94 dB`
+- GPU 实时状态:
+  - 利用率 `100%`
+  - 显存 `34391 MiB / 49140 MiB`
+
+### 已验证结论
+- 现在已经越过 Stage 3.1 和 2DGS。
+- 当前真实运行阶段是 3DGS 训练。
+- 当前进度大约是总 15000 iter 中的 2060 iter,约 `13.7%`。
+
+### 状态
+**目前在阶段4** - extensive 当前位于 3DGS 训练早期,正在持续推进。
+
+## [2026-03-22 15:32:20] [Session ID: eab9d6c3-318b-4c00-96b4-b400f09605f6] [记录类型]: 用户再次询问进度,刷新 3DGS 实时状态
+
+### 当前动作计划
+- 读取最新日志中的 2DGS / 3DGS 阶段标记。
+- 提取最新 3DGS iter 与最近一次 eval 指标。
+- 结合当前进程与 GPU 使用情况,给出最新进度快照。
+
+### 状态
+**目前在阶段4** - 正在刷新 3DGS 实时进度,避免沿用几分钟前的旧值。
+
+## [2026-03-22 16:27:45] [Session ID: eab9d6c3-318b-4c00-96b4-b400f09605f6] [记录类型]: 用户再次询问进度,刷新当前 3DGS 实时数值
+
+### 当前动作计划
+- 从最新日志提取当前 3DGS 迭代数。
+- 读取最近一次 eval 指标。
+- 结合当前 GPU 与训练进程状态,给出实时进度快照。
+
+### 状态
+**目前在阶段4** - 正在刷新最新 3DGS 训练进度。
+
+## [2026-03-22 17:38:20] [Session ID: eab9d6c3-318b-4c00-96b4-b400f09605f6] [记录类型]: 联合场景 extensive 已完成并产出最终 3DGS 文件与视频
+
+### 动态证据
+- `gs_3dgs` 目录已存在最终文件:
+  - `model_final.pt`
+  - `checkpoint_014999.pt`
+  - `canonical_points_final.ply`
+  - `splats_3dgs.ply`
+  - `gs_video_eval/render_input_poses.mp4`
+- 文件时间戳显示最终 3DGS 产物已在 `2026-03-22 17:36` 到 `17:37` 之间落盘。
+- 当前已无 `run_reconstruction.py` / `train_gs` / `eval_gs` 活跃进程。
+- 根场景下仍缺少:
+  - `output/video_to_world/joint_scene_xhc_bai/gs_video/0000_extend_transforms.json`
+
+### 已验证结论
+- 这次联合场景的 extensive 流程已经完成。
+- 最终应看的高质量分支是 `gs_3dgs`,不是 `gs_2dgs`。
+- 当前最终视频是 `render_input_poses.mp4`,不是自定义 gs_video 路径视频,因为根场景 transforms 仍缺失。
+
+### 状态
+**目前在阶段5** - 已完成最终产物核对,准备向用户说明最终该看哪个视频和哪个 3DGS 文件。
