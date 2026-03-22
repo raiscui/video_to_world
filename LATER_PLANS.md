@@ -44,3 +44,12 @@
   - 关闭 LPIPS
   - 缩短 GS `num_iters`
   - 可选关闭自动 eval
+
+## [2026-03-22 12:16:10] [Session ID: eab9d6c3-318b-4c00-96b4-b400f09605f6] 主题: multiview 入口应在 Stage 0 之前预校验透传参数
+
+### 备忘
+- 当前 `run_multiview_reconstruction.py` 会先完成昂贵的 Stage 0,然后才在调用 `run_reconstruction.py` 时暴露透传参数名错误。
+- 值得后续补一个更早失败的机制,例如:
+  - 启动前对透传参数做 `run_reconstruction.py --help` 级别的校验。
+  - 或增加兼容 alias,把旧的 `--config.alignment.*` 映射到 `--config.stage1.alignment.*`。
+- 这样可以避免“Stage 0 成功后才发现 CLI 写错”的高成本失败。

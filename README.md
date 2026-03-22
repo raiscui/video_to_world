@@ -61,9 +61,10 @@ The base `pixi` environment now includes `socksio`, so Python tooling that uses 
 Optionally, install [torch_kdtree](https://github.com/thomgrand/torch_kdtree) for GPU-accelerated KD-tree nearest-neighbor queries:
 
 ```bash
-export CUDA_HOME=/usr/local/cuda # point to a local installation of a matching CUDA toolkit
 pixi run install-torch-kdtree
 ```
+
+The task now auto-detects CUDA from `CUDA_HOME`, `/usr/local/cuda`, or `torch.utils.cpp_extension.CUDA_HOME`. If your toolkit lives somewhere unusual, override `CUDA_HOME` in `.envrc` first.
 
 Enter the environment for the rest of the commands in this README:
 

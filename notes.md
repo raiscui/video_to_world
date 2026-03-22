@@ -464,3 +464,122 @@
   - 如果 Stage 3.1 训练显存和数据链路都稳定,后续会继续进入 GS 训练阶段。
 - 最强备选解释:
   - 真正更重的风险可能会在 GS 训练或自动评估阶段再出现。
+
+## [2026-03-22 12:08:30] [Session ID: eab9d6c3-318b-4c00-96b4-b400f09605f6] 笔记: 旧流程切换为新 multiview extensive 的操作基线
+
+## 来源
+
+### 来源1: 用户最新指令
+- 要点:
+  - 需要停止当前 extensive 运行。
+  - 新命令使用 `run_multiview_reconstruction.py`。
+  - 新 scene root 固定为 `output/video_to_world/joint_scene_xhc_bai`。
+  - 需要显式设置 `--preprocess-max-frames 60` 与 `--preprocess-max-stride 2`。
+  - 对齐参数固定为 `num-frames=50`, `stride=8`, `offset=0`。
+  - 模式为 `extensive`。
+
+## 综合发现
+
+### 执行注意点
+- 停旧进程是必要前置动作,否则会与新任务竞争 GPU。
+- 新任务是联合多视角入口,与先前单 scene root extensive 命令不同。
+
+## [2026-03-22 12:10:25] [Session ID: eab9d6c3-318b-4c00-96b4-b400f09605f6] 笔记: 新 multiview extensive 已进入 Stage 0 首个视角预处理
+
+## 来源
+
+### 来源1: `/tmp/video_to_world_joint_scene_xhc_bai_extensive_20260322_121020.log`
+- 要点:
+  - 已打印 `Stage 0: preprocess_multiview.py`
+  - 已打印 `view=0 scene=xhc-bai_97e474c6`
+  - 正在执行 `preprocess_video.py`
+  - `ffmpeg` 已开始向 `per_view/view_0/frames/%06d.png` 输出帧
+
+## 综合发现
+
+### 启动正确性
+- 新 `scene_root` 已被真实采用,不是旧命令残留。
+- `preprocess-max-frames=60` 与 `preprocess-max-stride=2` 已传递到 Stage 0。
+
+## [2026-03-22 12:12:40] [Session ID: eab9d6c3-318b-4c00-96b4-b400f09605f6] 笔记: multiview 首次尝试失败点与修正方案
+
+## 来源
+
+### 来源1: `/tmp/video_to_world_joint_scene_xhc_bai_extensive_20260322_121020.log`
+- 要点:
+  - Stage 0 六个视角都已完成 DA3 preprocessing。
+  - 联合输出 JSON 已打印 `total_frames: 360`。
+  - 失败点发生在 `run_reconstruction.py` 被调用之后。
+  - 实际报错为 `Unrecognized options: --config.alignment.num-frames ...`
+
+### 来源2: `pixi run python run_reconstruction.py --help`
+- 要点:
+  - 正确参数名为:
+    - `--config.stage1.alignment.num-frames`
+    - `--config.stage1.alignment.stride`
+    - `--config.stage1.alignment.offset`
+
+## 综合发现
+
+### 失败性质
+- 这是 CLI 参数路径错误,不是 Stage 1/2/3 算法错误。
+- 已成功产出的 Stage 0 结果可以直接复用。
+
+## [2026-03-22 12:13:55] [Session ID: eab9d6c3-318b-4c00-96b4-b400f09605f6] 笔记: 当前环境缺失 torch_kdtree,续跑需切 cpu_kdtree
+
+## 来源
+
+### 来源1: `pixi run python -c 'import torch_kdtree'` 等价探针
+- 要点:
+  - 返回 `TORCH_KDTREE=missing`
+  - 具体异常为 `ModuleNotFoundError`
+
+## 综合发现
+
+### Stage 2 运行条件
+- 当前 extensive 若不显式设置 `--config.stage2.knn-backend cpu_kdtree`,在 Stage 2 会重现已知缺依赖失败。
+
+## [2026-03-22 12:17:45] [Session ID: eab9d6c3-318b-4c00-96b4-b400f09605f6] 笔记: Stage 1 已进入 ICP 主循环且 cpu_kdtree 正常工作
+
+## 来源
+
+### 来源1: `/tmp/video_to_world_joint_scene_xhc_bai_extensive_stage123_cpu_kdtree_20260322_121430.log`
+- 要点:
+  - `Saving point clouds: 360/360`
+  - `Computed valid pixel indices for 45 frames`
+  - `Rigid ICP f00001` 与 `Non-rigid ICP f00001` 已完成
+  - `Rigid ICP f00002` 与 `Non-rigid ICP f00002` 已完成
+  - 当前已进入 `Rigid ICP f00003`
+  - 每帧总耗时约 8 秒量级
+
+## 综合发现
+
+### Stage 1 真实状态
+- 当前流程不是卡死,而是在按 `44` 个目标帧推进 Stage 1。
+- `cpu_kdtree` 对当前环境是可用的正式绕过方案。
+
+## [2026-03-22 12:34:35] [Session ID: eab9d6c3-318b-4c00-96b4-b400f09605f6] 笔记: 当前真实进度已到 Stage 3.1 inverse deformation Epoch 6/30
+
+## 来源
+
+### 来源1: `/tmp/video_to_world_joint_scene_xhc_bai_extensive_stage123_cpu_kdtree_20260322_121430.log`
+- 要点:
+  - 日志中已出现:
+    - `Stage 1: Iterative Alignment`
+    - `Stage 2: Global Optimization`
+    - `Stage 3.1: Inverse Deformation Training`
+  - 最新训练标记已到:
+    - `Training: 5/30`
+    - `Epoch 6/30`
+
+### 来源2: 进程与 GPU 探针
+- 要点:
+  - 当前 compute app 是 `train_inverse_deformation`
+  - 显存约 `4.4 GiB`
+  - GPU 总占用约 `4.8 GiB`
+
+## 综合发现
+
+### 当前阶段判断
+- 现在已经越过 Stage 1 和 Stage 2。
+- 当前真正运行的是 Stage 3.1,还没有切到 2DGS / 3DGS。

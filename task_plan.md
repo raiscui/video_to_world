@@ -809,3 +809,204 @@
 
 ### 状态
 **目前在阶段5** - 正在长跑 2DGS 训练,后续继续观察关键切换点。
+
+## [2026-03-22 12:08:30] [Session ID: eab9d6c3-318b-4c00-96b4-b400f09605f6] [记录类型]: 用户要求中止旧 extensive 并切换到新的 multiview extensive 命令
+
+### 用户新指令
+- 停止当前正在运行的重建流程。
+- 改为执行新的联合多视角命令:
+  - `pixi run python run_multiview_reconstruction.py --views-root source/flashvsr_reference_xhc_bai/full_scale2x --scene-root output/video_to_world/joint_scene_xhc_bai --preprocess-max-frames 60 --preprocess-max-stride 2 --config.alignment.num-frames 50 --config.alignment.stride 8 --config.alignment.offset 0 --config.mode extensive`
+
+### 现象
+- 当前仍有旧的 `run_reconstruction.py` / `train_gs` 相关进程在运行。
+- 这些旧进程会继续占用 GPU 与输出日志,不适合与新任务并行。
+
+### 当前动作计划
+- 先终止旧重建链路及其子进程。
+- 再以用户指定参数重新启动 `run_multiview_reconstruction.py`。
+- 启动后观察首批日志,确认命令已真正进入新的 scene root 与参数组合。
+
+### 状态
+**目前在阶段3** - 正在执行任务切换,先停掉旧流程再重新启动新流程。
+
+## [2026-03-22 12:09:55] [Session ID: eab9d6c3-318b-4c00-96b4-b400f09605f6] [记录类型]: 旧流程已停止,准备启动新的 joint_scene_xhc_bai multiview extensive
+
+### 已验证现象
+- 旧的 `run_reconstruction.py` / `train_gs` 相关进程已经停止。
+- `nvidia-smi --query-compute-apps` 当前为空,说明 GPU 计算进程已清空。
+- 新目标目录 `output/video_to_world/joint_scene_xhc_bai` 当前不存在,本轮可直接作为干净输出目录。
+- `run_multiview_reconstruction.py --help` 已确认支持:
+  - `--preprocess-max-frames`
+  - `--preprocess-max-stride`
+  - 其余 `--config.*` 额外参数透传到下游 `run_reconstruction.py`
+
+### 启动方案
+- 使用代理与 HF mirror 环境:
+  - `http_proxy=http://127.0.0.1:7890`
+  - `https_proxy=http://127.0.0.1:7890`
+  - `all_proxy=socks5://127.0.0.1:7890`
+  - `HF_ENDPOINT=https://hf-mirror.com`
+- 正式命令:
+  - `pixi run python run_multiview_reconstruction.py --views-root source/flashvsr_reference_xhc_bai/full_scale2x --scene-root output/video_to_world/joint_scene_xhc_bai --preprocess-max-frames 60 --preprocess-max-stride 2 --config.alignment.num-frames 50 --config.alignment.stride 8 --config.alignment.offset 0 --config.mode extensive`
+
+### 状态
+**目前在阶段3** - 已完成停旧与参数核对,正在启动新的 multiview extensive。
+
+## [2026-03-22 12:10:25] [Session ID: eab9d6c3-318b-4c00-96b4-b400f09605f6] [记录类型]: 新 multiview extensive 已启动并进入 Stage 0
+
+### 动态证据
+- 新主会话已启动,统一 PTY session ID: `45818`。
+- 主日志文件:
+  - `/tmp/video_to_world_joint_scene_xhc_bai_extensive_20260322_121020.log`
+- 首批输出已明确显示:
+  - `[JOINT-MULTIVIEW] Stage 0: preprocess_multiview.py`
+  - `scene-root /workspace/video_to_world/output/video_to_world/joint_scene_xhc_bai`
+  - `--max-frames 60`
+  - `--max-stride 2`
+- 当前已进入:
+  - `view=0`
+  - `preprocess_video.py`
+  - `ffmpeg` 抽帧阶段
+
+### 当前结论
+- 用户指定的新命令已经被正确执行。
+- 当前还只是启动初段,需要继续观察是否顺利完成首个视角预处理并继续推进。
+
+### 状态
+**目前在阶段4** - 新会话已进入 Stage 0,正在观察首批日志与错误信号。
+
+## [2026-03-22 12:12:40] [Session ID: eab9d6c3-318b-4c00-96b4-b400f09605f6] [记录类型]: 新 multiview 首次尝试在 Stage 0 完成后因旧参数名失败,已准备直接续跑 Stage 1/2/3
+
+### 现象
+- `run_multiview_reconstruction.py` 已完成全部 6 个视角的 Stage 0 预处理与联合合并。
+- 已生成联合结果:
+  - `output/video_to_world/joint_scene_xhc_bai/exports/npz/results.npz`
+  - `total_frames = 360`
+- 随后在调用 `run_reconstruction.py` 时失败。
+
+### 已验证结论
+- 失败不是算法阶段崩溃,而是 CLI 参数名不匹配。
+- 动态证据来自实际报错:
+  - `Unrecognized options: --config.alignment.num-frames ...`
+- 静态证据来自 `run_reconstruction.py --help`:
+  - 正确字段是 `--config.stage1.alignment.num-frames`
+  - 正确字段是 `--config.stage1.alignment.stride`
+  - 正确字段是 `--config.stage1.alignment.offset`
+
+### 处理决策
+- 不重复已经成功完成的 Stage 0。
+- 直接对 `output/video_to_world/joint_scene_xhc_bai` 调用 `run_reconstruction.py`,使用更正后的参数继续 Stage 1/2/3。
+
+### 状态
+**目前在阶段4** - 已确认失败点与修正参数,正在直接续跑 Stage 1/2/3。
+
+## [2026-03-22 12:13:55] [Session ID: eab9d6c3-318b-4c00-96b4-b400f09605f6] [记录类型]: 续跑前确认 Stage 2 需要显式使用 cpu_kdtree
+
+### 动态证据
+- 已执行环境探针:
+  - `pixi run python -c 'import torch_kdtree'`
+- 返回结果:
+  - `TORCH_KDTREE=missing`
+  - `ModuleNotFoundError: No module named 'torch_kdtree'`
+
+### 已验证结论
+- 当前环境不能使用默认的 `gpu_kdtree` 路径。
+- 为避免在 Stage 2 重复触发已知失败,本次续跑需要显式加入:
+  - `--config.stage2.knn-backend cpu_kdtree`
+- 该调整影响速度,不影响结果质量。
+
+### 状态
+**目前在阶段4** - 已补齐 Stage 2 环境探针,即将带 `cpu_kdtree` 正式续跑。
+
+## [2026-03-22 12:16:10] [Session ID: eab9d6c3-318b-4c00-96b4-b400f09605f6] [记录类型]: 新 joint_scene_xhc_bai extensive 已在修正参数后进入 Stage 1 持续计算
+
+### 已验证现象
+- 续跑命令会话 ID: `17748`
+- 续跑日志:
+  - `/tmp/video_to_world_joint_scene_xhc_bai_extensive_stage123_cpu_kdtree_20260322_121430.log`
+- 已明确进入:
+  - `[PIPELINE] === Stage 1: Iterative Alignment ===`
+  - `python -m frame_to_model_icp --config.root-path ... --config.alignment.stride 8 --config.icp-early-stopping-min-delta 5e-06`
+- `Back-projecting frames: 360/360` 已完成。
+- 当前 `frame_to_model_icp` 进程仍在运行:
+  - PID `108213`
+  - `STAT=Rl+`
+  - `CPU≈181%`
+- Stage 1 run 目录已创建:
+  - `output/video_to_world/joint_scene_xhc_bai/frame_to_model_icp_50_8_offset0/after_non_rigid_icp/config.json`
+  - `output/video_to_world/joint_scene_xhc_bai/frame_to_model_icp_50_8_offset0/tensorboard/events...`
+
+### 当前判断
+- 现在不是失败退出状态,而是 Stage 1 正在继续计算。
+- 当前日志暂时安静,但进程和输出目录都表明它没有停掉。
+
+### 状态
+**目前在阶段4** - 新 extensive 已纠正参数并进入 Stage 1 长计算阶段,正在持续运行。
+
+## [2026-03-22 12:17:45] [Session ID: eab9d6c3-318b-4c00-96b4-b400f09605f6] [记录类型]: Stage 1 已证实进入 ICP 主循环并持续推进
+
+### 动态证据
+- `Saving point clouds: 360/360` 已完成。
+- 日志已出现:
+  - `Computed valid pixel indices for 45 frames`
+  - `estimate_normals[cpu_kdtree] ...`
+  - `Rigid ICP f00001 ...`
+  - `Non-rigid ICP f00001 ...`
+  - `RoMa matches=4943 pairs=1`
+  - `[Timing][Frame 1] RoMa=6156.9 ms | ICP=1892.9 ms | Merge=64.0 ms | Total=8113.8 ms`
+  - `[Timing][Frame 2] RoMa=6557.0 ms | ICP=1771.9 ms | Merge=66.2 ms | Total=8395.1 ms`
+- 当前进度已推进到:
+  - `Frames: 2/44`
+  - `Rigid ICP f00003 ...`
+  - `RoMa matching...`
+
+### 已验证结论
+- 这条新的 extensive 续跑已经真正进入 Stage 1 的主循环,不是仅停留在初始化阶段。
+- `cpu_kdtree` 路径在当前环境下工作正常。
+- 当前仍在持续运行,未见新的异常退出。
+
+### 状态
+**目前在阶段4** - Stage 1 主循环正常推进中,当前已越过前两帧的刚性与非刚性 ICP。
+
+## [2026-03-22 12:34:35] [Session ID: eab9d6c3-318b-4c00-96b4-b400f09605f6] [记录类型]: 当前已越过 Stage 2,进入 Stage 3.1 inverse deformation 训练中段
+
+### 动态证据
+- 当前存活进程:
+  - `run_reconstruction.py`
+  - `train_inverse_deformation` PID `564582`
+- GPU 实时状态(2026-03-22 12:34:08):
+  - 利用率 `41%`
+  - 显存 `4853 MiB / 49140 MiB`
+- 日志阶段头已确认:
+  - `Stage 1: Iterative Alignment`
+  - `Stage 2: Global Optimization`
+  - `Stage 3.1: Inverse Deformation Training`
+- 当前训练进度已到:
+  - `Training: 5/30`
+  - 已进入 `Epoch 6/30`
+
+### 已验证结论
+- Stage 1 已完成。
+- Stage 2 已完成。
+- 当前正在 Stage 3.1 的 inverse deformation 训练,而且已经不是刚启动,已经跑到第 6 个 epoch。
+- 还没有进入 Stage 3.2 / 3.3。
+
+### 状态
+**目前在阶段4** - extensive 当前位于 Stage 3.1 训练中段,正在跑 `Epoch 6/30`。
+
+## [2026-03-22 12:36:35] [Session ID: 645377ac-8a48-4336-a3f3-dad38dca8dd8] [记录类型]: 启用支线上下文索引 - torch_kdtree 安装失败排查
+
+### 启用原因
+- 当前用户反馈 `pixi run install-torch-kdtree` 直接失败,但主线 `task_plan.md` 正在跟踪另一个 extensive 长任务。
+- 为避免污染主线状态,本轮为 `torch_kdtree` 安装排查单独启用一套带后缀的六文件上下文。
+
+### 支线上下文集
+- `task_plan__torch_kdtree_install.md`
+- `notes__torch_kdtree_install.md`
+- `WORKLOG__torch_kdtree_install.md`
+- `LATER_PLANS__torch_kdtree_install.md`
+- `ERRORFIX__torch_kdtree_install.md`
+- `EPIPHANY_LOG__torch_kdtree_install.md`
+
+### 主题
+- 核对 `CUDA_HOME` 缺失究竟是环境问题,还是 `install-torch-kdtree` 任务缺少自动探测。

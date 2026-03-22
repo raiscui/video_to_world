@@ -39,6 +39,75 @@ clear_loopback_proxy_vars() {
   fi
 }
 
+# 把多个目录按 PATH 风格拼成冒号分隔字符串。
+# 这里只保留真实存在的目录,避免往环境变量里塞坏路径。
+join_colon_paths() {
+  local result=""
+  local entry=""
+
+  for entry in "$@"; do
+    if [[ -z "${entry}" || ! -d "${entry}" ]]; then
+      continue
+    fi
+
+    if [[ -z "${result}" ]]; then
+      result="${entry}"
+    else
+      result="${result}:${entry}"
+    fi
+  done
+
+  printf '%s' "${result}"
+}
+
+# 把一组目录前置到 PATH / CPATH / LD_LIBRARY_PATH 这类变量前面。
+# 这样当前任务优先命中我们刚探测到的 CUDA 工具链路径。
+prepend_path_entries() {
+  local var_name="$1"
+  shift
+  local joined=""
+
+  joined="$(join_colon_paths "$@")"
+  if [[ -z "${joined}" ]]; then
+    return 0
+  fi
+
+  if [[ -n "${!var_name:-}" ]]; then
+    printf -v "${var_name}" '%s:%s' "${joined}" "${!var_name}"
+  else
+    printf -v "${var_name}" '%s' "${joined}"
+  fi
+
+  export "${var_name}"
+}
+
+# 统一探测本机 CUDA toolkit 根目录。
+# 顺序保持和仓库现有 tiny-cuda-nn 安装逻辑一致:
+# 1. 用户显式导出的 CUDA_HOME
+# 2. 最常见的 /usr/local/cuda
+# 3. PyTorch 能识别到的 CUDA_HOME
+detect_cuda_home() {
+  if [[ -n "${CUDA_HOME:-}" && -d "${CUDA_HOME}" ]]; then
+    printf '%s\n' "${CUDA_HOME}"
+    return 0
+  fi
+
+  if [[ -d /usr/local/cuda ]]; then
+    printf '/usr/local/cuda\n'
+    return 0
+  fi
+
+  python - <<'PY'
+try:
+    from torch.utils.cpp_extension import CUDA_HOME
+except Exception:
+    CUDA_HOME = None
+
+if CUDA_HOME:
+    print(CUDA_HOME)
+PY
+}
+
 # 统一判断某个 Git 仓库里是否已经有指定 commit。
 # 这样任务在“本地已经满足条件”时,就可以跳过多余的远程 fetch。
 git_repo_has_commit() {

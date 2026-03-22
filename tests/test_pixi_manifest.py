@@ -18,14 +18,13 @@ class PixiManifestTests(unittest.TestCase):
         self.gsplat_script_text = self.gsplat_script_path.read_text(encoding="utf-8")
         self.tinycudann_script_path = self.repo_root / "scripts" / "install_tinycudann.sh"
         self.tinycudann_script_text = self.tinycudann_script_path.read_text(encoding="utf-8")
+        self.torch_kdtree_script_path = self.repo_root / "scripts" / "install_torch_kdtree.sh"
+        self.torch_kdtree_script_text = self.torch_kdtree_script_path.read_text(encoding="utf-8")
         self.helper_script_path = self.repo_root / "scripts" / "pixi_task_helpers.sh"
         self.helper_script_text = self.helper_script_path.read_text(encoding="utf-8")
 
     def test_github_tasks_source_proxy_helper(self) -> None:
-        inline_task_names = (
-            "setup-romav2",
-            "install-torch-kdtree",
-        )
+        inline_task_names = ("setup-romav2",)
 
         for task_name in inline_task_names:
             with self.subTest(task_name=task_name):
@@ -39,7 +38,11 @@ class PixiManifestTests(unittest.TestCase):
         self.assertIn("clear_loopback_proxy_vars", self.depth_script_text)
         self.assertIn("source \"${repo_root}/scripts/pixi_task_helpers.sh\"", self.tinycudann_script_text)
         self.assertIn("clear_loopback_proxy_vars", self.tinycudann_script_text)
+        self.assertIn("source \"${repo_root}/scripts/pixi_task_helpers.sh\"", self.torch_kdtree_script_text)
+        self.assertIn("clear_loopback_proxy_vars", self.torch_kdtree_script_text)
         self.assertIn('keep_loopback_proxy="${PIXI_KEEP_LOOPBACK_PROXY:-0}"', self.helper_script_text)
+        self.assertIn("detect_cuda_home()", self.helper_script_text)
+        self.assertIn("prepend_path_entries()", self.helper_script_text)
 
     def test_install_gsplat_uses_script_with_glm_repair(self) -> None:
         task_block = self._extract_task_block("install-gsplat")
@@ -100,6 +103,22 @@ class PixiManifestTests(unittest.TestCase):
         self.assertIn('prepare_cuda_build_env', self.tinycudann_script_text)
         self.assertIn('python -m pip install --no-build-isolation "${target_binding_dir}"', self.tinycudann_script_text)
 
+    def test_install_torch_kdtree_uses_cuda_detect_script(self) -> None:
+        task_block = self._extract_task_block("install-torch-kdtree")
+        self.assertEqual(task_block.strip(), 'install-torch-kdtree = "bash scripts/install_torch_kdtree.sh"')
+        self.assertTrue(self.torch_kdtree_script_path.is_file())
+        self.assertIn('target_repo="${repo_root}/third_party/torch_kdtree"', self.torch_kdtree_script_text)
+        self.assertIn("prepare_cuda_build_env()", self.torch_kdtree_script_text)
+        self.assertIn('detected_cuda_home="$(detect_cuda_home)"', self.torch_kdtree_script_text)
+        self.assertIn('export CUDA_HOME="${detected_cuda_home}"', self.torch_kdtree_script_text)
+        self.assertIn('prepend_path_entries PATH "${CUDA_HOME}/bin"', self.torch_kdtree_script_text)
+        self.assertIn('export CUDACXX="${CUDA_HOME}/bin/nvcc"', self.torch_kdtree_script_text)
+        self.assertIn(
+            'run_timed_command \\\n      180 \\\n      "clone torch_kdtree 主仓库" \\',
+            self.torch_kdtree_script_text,
+        )
+        self.assertIn('python -m pip install --no-build-isolation "${target_repo}"', self.torch_kdtree_script_text)
+
     def test_envrc_documents_depth_anything_local_repo(self) -> None:
         self.assertTrue(self.envrc_path.is_file())
         self.assertIn("DEPTH_ANYTHING_3_LOCAL_REPO", self.envrc_text)
@@ -109,6 +128,8 @@ class PixiManifestTests(unittest.TestCase):
         self.assertIn("/tmp/video_to_world-tiny-cuda-nn", self.envrc_text)
         self.assertIn("TINYCUDANN_ARCHIVE_CACHE_DIR", self.envrc_text)
         self.assertIn("/tmp/video_to_world-tinycudann-archives", self.envrc_text)
+        self.assertIn("CUDA_HOME", self.envrc_text)
+        self.assertIn("/usr/local/cuda", self.envrc_text)
         self.assertIn("PIXI_KEEP_LOOPBACK_PROXY", self.envrc_text)
 
     def test_manifest_includes_socksio_for_socks_proxy_downloads(self) -> None:

@@ -30,22 +30,7 @@ fi
 python -m pip install -e "third_party/RoMaV2[fused-local-corr]"
 """] }
 setup = { depends-on = ["install-torch-stack", "setup-depth-anything-3", "install-gsplat", "install-tinycudann", "setup-romav2"] }
-install-torch-kdtree = { cmd = ["bash", "-lc", """
-set -euo pipefail
-source scripts/pixi_task_helpers.sh
-clear_loopback_proxy_vars
-if [ -z "${CUDA_HOME:-}" ]; then
-  echo "CUDA_HOME is not set. Please export CUDA_HOME=/usr/local/cuda first." >&2
-  exit 1
-fi
-mkdir -p third_party
-if [ ! -d third_party/torch_kdtree/.git ]; then
-  git clone https://github.com/thomgrand/torch_kdtree third_party/torch_kdtree
-fi
-git -C third_party/torch_kdtree submodule update --init --recursive
-python -m pip install -U cmake ninja
-CPLUS_INCLUDE_PATH="$CUDA_HOME/include:${CPLUS_INCLUDE_PATH:-}" python -m pip install third_party/torch_kdtree --no-build-isolation
-"""] }
+install-torch-kdtree = "bash scripts/install_torch_kdtree.sh"
 
 [dependencies]
 python = "3.10.*"
