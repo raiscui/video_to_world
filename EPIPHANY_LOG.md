@@ -222,3 +222,34 @@
 
 ### 后续讨论入口
 - 以后任何 GPU 主流程如果要在尾部再拉 GPU 子进程,优先先查: 父进程是不是已经 `del` 大对象并 `empty_cache()`。
+
+## [2026-03-22 11:30:24] [Session ID: 1774147758-2955119] 主题: 当前联合多视角默认 Stage 1 采样会只落在第一个视角
+
+### 发现来源
+- 核对 `output/flashvsr_reference_xhc_bai/preprocess_frames.json` 的全局帧区间。
+- 核对多个 `frame_to_model_icp_*/after_non_rigid_icp/config.json` 的 `num_frames=50, stride=2, offset=0`。
+
+### 核心问题
+- 当前联合 `results.npz` 是按 `view_0 -> view_1 -> ... -> view_5` 顺序顺排的。
+- Stage 1 默认索引公式是 `all_indices[offset::stride][:num_frames]`。
+- 在 `num_frames=50, stride=2, offset=0` 下,选中的索引是 `0,2,4,...,98`。
+- 这意味着默认 Stage 1 实际只使用了联合序列最前面的 `view_0` 片段,并没有覆盖后续视角。
+
+### 为什么重要
+- 表面上看是在“多视角联合场景”上跑了 ICP。
+- 但按当前顺序和默认参数,它并不等于“从 6 个视角里都抽了一部分帧参与 ICP”。
+
+### 未来风险
+- 很容易误以为 Stage 1 已经在多视角输入上产生了联合配准证据。
+- 如果不显式调整 ordering / offset / stride / num_frames 策略,后续对“多视角联合”效果的判断会失真。
+
+### 当前结论
+- 当前已知事实:
+  - 现有已落盘 Stage 1 运行全部使用 `stride=2`。
+  - 现有默认 Stage 1 采样窗口全部落在 `view_0` 的全局帧段内。
+- 仍未确认的部分:
+  - 后续是否应改联合序列顺序为跨视角交织,或改默认 Stage 1 子采样策略。
+
+### 后续讨论入口
+- 继续看 `preprocess_multiview.py::merge_multiview_scene()` 的拼接顺序。
+- 再看 `data/data_loading.py::load_data()` 的 `all_indices[offset::stride][:num_frames]` 选择规则。

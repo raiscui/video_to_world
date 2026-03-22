@@ -13,6 +13,7 @@ Forward chain:  camera_pts -> local_deform_i(.) -> se3_apply(c2w_i, .) -> canoni
 Frame 0 defines the canonical frame and is frozen (gauge fix).
 """
 
+import gc
 import json
 import os
 import time
@@ -32,6 +33,8 @@ from models.roma_matcher import (
     MatchHistory,
     RoMaMatcherWrapper,
     compute_roma_matches_for_frame,
+    compute_roma_matches_for_frame_isolated,
+    frame_has_uncached_roma_pairs,
     _get_cache_key,
     _get_cache_path,
     load_cached_matches,
@@ -298,7 +301,6 @@ def main(config: FrameToModelICPConfig):
         return matcher
 
     if use_roma_matching:
-        roma_matcher = _create_roma_matcher()
         match_history = MatchHistory()
 
         # Set up caching
@@ -537,25 +539,60 @@ def main(config: FrameToModelICPConfig):
         roma_matches_for_frame = None
         if i >= 15:
             _log_cuda_memory("before_roma", i)
-        if roma_matcher is not None and match_history is not None:
+        if match_history is not None:
             frames_pbar.set_postfix_str("RoMa matching...")
 
-            if torch.cuda.is_available():
-                # RoMa 前主动归还一轮可释放缓存,避免上一轮 ICP 的 allocator 残留把新匹配挤爆。
-                torch.cuda.empty_cache()
-
-            # Compute/load matches (returns original unfiltered matches)
-            roma_matches_for_frame = compute_roma_matches_for_frame(
-                roma_matcher=roma_matcher,
-                images=images,
+            has_uncached_pairs = frame_has_uncached_roma_pairs(
                 current_frame_idx=i,
                 max_references=config.roma.roma_max_references,
-                num_samples_per_pair=config.roma.roma_num_samples,
-                certainty_threshold=config.roma.roma_certainty_threshold,
-                cache_path=roma_cache_path,
                 cached_matches=cached_roma_matches,
                 reference_selection_mode=config.roma.roma_reference_sampling,
             )
+            use_isolated_roma_worker = (
+                has_uncached_pairs
+                and config.roma.roma_version == "v2"
+                and torch.cuda.is_available()
+            )
+
+            if use_isolated_roma_worker:
+                # 这里不在主进程里直接跑 RoMaV2。
+                # 实测它会把 GPU 状态按 pair 数累积到当前 Python 进程里,
+                # 即使张量与 matcher 已删除也不会及时回落。
+                # 把当前帧的 uncached 匹配隔离到子进程,由进程退出完成强释放。
+                roma_matches_for_frame = compute_roma_matches_for_frame_isolated(
+                    root_path=config.root_path,
+                    num_frames=config.alignment.num_frames,
+                    stride=config.alignment.stride,
+                    current_frame_idx=i,
+                    max_references=config.roma.roma_max_references,
+                    num_samples_per_pair=config.roma.roma_num_samples,
+                    certainty_threshold=config.roma.roma_certainty_threshold,
+                    roma_version=config.roma.roma_version,
+                    roma_model=config.roma.roma_model,
+                    reference_selection_mode=config.roma.roma_reference_sampling,
+                    cache_path=roma_cache_path,
+                )
+                roma_matcher = None
+            else:
+                if has_uncached_pairs and roma_matcher is None:
+                    roma_matcher = _create_roma_matcher()
+
+                if torch.cuda.is_available():
+                    # RoMa 前主动归还一轮可释放缓存,避免上一轮 ICP 的 allocator 残留把新匹配挤爆。
+                    torch.cuda.empty_cache()
+
+                # Compute/load matches (returns original unfiltered matches)
+                roma_matches_for_frame, roma_matcher = compute_roma_matches_for_frame(
+                    roma_matcher=roma_matcher,
+                    images=images,
+                    current_frame_idx=i,
+                    max_references=config.roma.roma_max_references,
+                    num_samples_per_pair=config.roma.roma_num_samples,
+                    certainty_threshold=config.roma.roma_certainty_threshold,
+                    cache_path=roma_cache_path,
+                    cached_matches=cached_roma_matches,
+                    reference_selection_mode=config.roma.roma_reference_sampling,
+                )
 
             # Save any newly computed matches to disk
             if roma_matches_for_frame and roma_cache_path is not None:
@@ -601,8 +638,9 @@ def main(config: FrameToModelICPConfig):
                 # 会持续抬高 `memory_allocated()`。
                 # 这里按帧重建 matcher,把泄漏生命周期限制在当前帧内。
                 del roma_matcher
+                roma_matcher = None
+                gc.collect()
                 torch.cuda.empty_cache()
-                roma_matcher = _create_roma_matcher()
 
         t_roma_end = time.perf_counter()
         if i >= 15:
@@ -941,6 +979,18 @@ def main(config: FrameToModelICPConfig):
             final_pixel_indices = filtered_vpi[merge_keep_mask]
             model_valid_pixel_indices_list.append(final_pixel_indices.cpu())
 
+        # 显式断开当前帧的大对象引用,避免 Python 周期回收滞后时把
+        # 这一帧的 GPU 状态继续拖进下一帧,放大 late-frame 的常驻显存。
+        del global_deform
+        del local_deform
+        del aligned_src_to_ref_nr
+        del pcl_world
+        del src_pcd_full
+        del ref_pcd_full
+        if roma_matches_for_frame is not None:
+            del roma_matches_for_frame
+
+        gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             if i >= 15:

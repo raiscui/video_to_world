@@ -430,3 +430,243 @@
   - `run_reconstruction.py --config.dry-run` 已真实打印 `--config.num-iters 150`
   - 手动 `eval_gs` 已在真实 checkpoint 上跑通
   - 1 iter 入口级 smoke 已在最终日志中消除 auto eval error
+
+## [2026-03-22 10:30:30] [Session ID: e7d33bb8-22af-4207-a9b3-224a0f3a3b4e] 问题: `source/flashvsr_reference_xhc_bai` 的 extensive 正式运行在 Stage 1 因 RoMa CUDA OOM 失败
+
+### 现象
+- `run_multiview_reconstruction.py --config.mode extensive` 能成功完成 Stage 0 联合预处理。
+- 进入 `run_reconstruction.py -> frame_to_model_icp.py` 后,Stage 1 在处理中段失败退出。
+- PTY 会话 `90694` 最终退出码为 `1`。
+
+### 假设
+- 主假设:
+  - extensive 模式下 Stage 1 的 RoMa matching / refiner 显存峰值过高,导致中途 OOM。
+- 备选解释:
+  - 也可能是 RoMa 匹配过程存在未及时释放的中间张量或缓存增长,使显存随着帧推进持续累积。
+
+### 验证
+- 动态证据:
+  - 主日志明确报错:
+    - `torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 200.00 MiB`
+  - 调用链明确落在:
+    - `models/roma_matcher.py`
+    - `third_party/RoMaV2/src/romav2/romav2.py`
+    - `third_party/RoMaV2/src/romav2/refiner.py`
+  - 失败时日志显示:
+    - `Frames: 16%|█▋| 8/49`
+    - 该进程已占用约 `46.86 GiB` 显存
+- 静态证据:
+  - 本次 Stage 1 使用的是 extensive 参数对应的更严格配置:
+    - `--config.icp-early-stopping-min-delta 5e-06`
+  - Stage 1 真实启用了 RoMa matcher,并且每帧都进入 `compute_roma_matches_for_frame()` 链路。
+
+### 原因
+- 当前已验证结论:
+  - 本次 extensive 长跑没有完成。
+  - 当前首个真实失败点是 Stage 1 的 RoMa CUDA OOM。
+- 当前仍未完全确认的部分:
+  - 峰值到底主要来自单次 RoMa 前向过大,还是来自跨帧累积未释放。
+
+### 修复 / 处置
+- 本轮尚未修复,仅完成失败点定位与证据归档。
+- 下一轮应优先围绕 Stage 1 的 RoMa 显存生命周期做最小证伪实验。
+
+### 验证结果
+- 已通过的阶段:
+  - Stage 0 全部完成
+  - Stage 1 已进入真实 GPU 计算并推进到中段
+- 未通过的阶段:
+  - Stage 1 extensive 对齐未完成
+  - 整条 extensive 管线未完成
+
+## [2026-03-22 10:45:08] [Session ID: 2e546d88-242b-47b8-a6a3-eff09359ded0] 问题: 修复旧 RoMa OOM 后,正式长跑在 `RoMaV2.sample` 的 KDE 阶段再次 OOM
+
+### 现象
+- 修复后的正式命令:
+  - `pixi run python run_reconstruction.py --config.root-path output/flashvsr_reference_xhc_bai --config.mode extensive --config.stage1.out-suffix _zzextensive_rerun_20260322_104213`
+- 已经越过旧的 `frame 8` OOM 点,但在 `frame 13` 左右再次失败。
+- 新栈顶为:
+  - `third_party/RoMaV2/src/romav2/romav2.py::kde`
+  - `scores = (-(torch.cdist(x, x) ** 2) / (2 * std**2)).exp()`
+- 动态错误:
+  - `torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 764.00 MiB`
+
+### 假设
+- 主假设:
+  - 新的 OOM 来自 `sample()` 内 KDE 的 `torch.cdist(x, x)` 二次增长峰值,属于另一类显存瓶颈。
+- 备选解释:
+  - 也可能是前面阶段的常驻显存已经抬太高,`kde()` 只是第一个暴露出来的热点,真正需要做的是更广义的 late-frame 降采样。
+
+### 当前验证
+- 动态证据:
+  - 正式长跑已推进到 `frame 13`,说明上一轮 refiner 生命周期问题已被部分解决。
+  - 本次错误栈稳定落在 `sample() -> kde() -> torch.cdist()`。
+- 静态证据:
+  - `torch.cdist(x, x)` 对样本数是平方级内存开销。
+
+### 当前状态
+- 旧问题并未完全复发,而是暴露了新的后段 OOM。
+- 需要继续做针对 `sample()` / `kde()` 的正式修复,不能直接宣称 extensive 已跑通。
+
+## [2026-03-22 11:32:10] [Session ID: 3515473] 问题: 去掉 inner refresh 后,Stage 1 已越过旧的 repeated-init 死亡点,但在第一个需要新算 20 个 pair 的 late-frame 仍会留下 20GiB+ 常驻显存并在下一帧 OOM
+
+### 现象
+- 新 probe 命令:
+  - `pixi run python -m frame_to_model_icp --config.root-path output/flashvsr_reference_xhc_bai --config.icp-early-stopping-min-delta 5e-06 --config.out-suffix _zzinnerfix_probe_20260322_111920`
+- 日志:
+  - `/tmp/video_to_world_flashvsr_reference_xhc_bai_stage1_probe_innerfix_20260322_111920.log`
+- 关键动态证据:
+  - `frame 18` / `frame 19` 的 `after_roma` 都保持在约 `0.90 GiB`
+  - `frame 20` 的 `after_roma` 跳到 `20.81 GiB`
+  - `frame 20` 的 `after_empty_cache` 仍是 `20.81 GiB`
+  - `frame 21` 在 `before_roma=20.81 GiB` 的基线上 снова 于 `refiner.py: z = z.float()` OOM
+
+### 假设
+- 主假设:
+  - 旧的 repeated init 问题已修掉,但单帧内连续计算约 20 个新 pair 时,`match_images()` / `self.model.match()` 链路仍会残留大量 GPU 状态。
+- 备选解释:
+  - 也可能是第 20 个新 pair 附近出现了天然高峰,而 allocator 无法在帧结束前把大块显存重新变为可用。
+
+### 验证
+- 静态证据:
+  - 已删除 `compute_roma_matches_for_frame()` 里“每 4 个新 pair 重建一次 matcher”的逻辑。
+  - 新日志中,`frame 20` 单帧只出现 1 次 `RoMa v2 initialized`,不再有上一轮的 5 次初始化。
+- 动态证据:
+  - 新 probe 已稳定越过旧的 `frame 18/19` repeated-init 阶段。
+  - 但在第一个需要新算 20 个 pair 的 `frame 20`,常驻显存仍被抬到 `20.81 GiB` 并跨帧残留。
+
+### 原因
+- 当前已确认的部分:
+  - “帧内 repeated init 造成阶梯爆涨”这条已经被修掉。
+- 当前仍未确认的部分:
+  - `20.81 GiB` 这层残留到底来自 `match()` / `sample()` 的哪一步,还需要更细粒度日志或 hard unload 实验。
+
+### 修复 / 处置
+- 已完成修复:
+  - 去掉 `compute_roma_matches_for_frame()` 内的帧内 repeated matcher rebuild。
+  - 新增单测,确保单帧内不会偷偷重建 matcher。
+- 当前结论:
+  - 修复有效,但还不足以让 formal extensive 跑通。
+  - 下一步应优先做 pair 级显存打点,或验证 `model.cpu() / unload` 是否能打断单帧累计。
+
+### 验证结果
+- 已通过:
+  - `python3 -m py_compile ...`
+  - `timeout 300s pixi run python -m unittest tests.test_roma_memory_offload`
+  - Stage 1 probe 已稳定越过旧的 `frame 18/19` repeated-init OOM 区间
+- 未通过:
+  - Stage 1 仍在 `frame 21` 前后因 RoMa OOM 失败
+
+## [2026-03-22 11:49:30] [Session ID: 3515473] 问题: extensive Stage 1 的 RoMa late-frame OOM 通过 isolated worker 方案被真正打通
+
+### 现象
+- 旧实现下,第一个需要新算 `20` 个 pair 的 late-frame 会把常驻显存抬到 `20 GiB+`,随后在下一帧 OOM。
+- 新 probe 命令:
+  - `pixi run python -m frame_to_model_icp --config.root-path output/flashvsr_reference_xhc_bai --config.icp-early-stopping-min-delta 5e-06 --config.out-suffix _zzisolated_probe_20260322_114420`
+- 新日志:
+  - `/tmp/video_to_world_flashvsr_reference_xhc_bai_stage1_probe_isolated_20260322_114420.log`
+
+### 假设
+- 主假设:
+  - 把 RoMa uncached pair 计算隔离到子进程后,可以用“子进程退出”硬切断进程内 GPU 状态累计。
+- 备选解释:
+  - 即使 isolated worker 有帮助,也可能只够越过中段,后半段仍会在更晚帧再次 OOM。
+
+### 验证
+- 动态证据:
+  - 日志完整推进到 `Frames: 100%|...| 49/49`。
+  - `Frame 44~49` 的 `after_empty_cache` 始终回到约 `allocated=0.37 GiB reserved=0.46 GiB`。
+  - 日志中未发现 `Traceback` / `OutOfMemoryError` / `ERROR`。
+- 静态证据:
+  - Stage 1 输出目录已完整生成,包含 `aligned_points.ply`、`roma_match_history.pt`、全量 per-frame deform 文件。
+
+### 原因
+- 已验证结论:
+  - 这次真正的瓶颈是单进程内 RoMa GPU 状态累计,而不是这张卡天然无法承受 extensive Stage 1。
+  - 用子进程包住 uncached pair 的 RoMa 计算后,随着 worker 退出,累计状态被有效回收。
+
+### 修复 / 处置
+- 已完成:
+  - RoMa uncached pair 改走 isolated worker。
+  - Stage 1 probe 已完整跑通。
+- 后续处置:
+  - 正式 extensive 直接复用这份成功的 Stage 1 结果,继续 Stage 2/3,避免重复耗时。
+
+### 验证结果
+- 通过:
+  - late-frame `Frame 49` 仍未 OOM
+  - Stage 1 全量输出落盘
+- 待继续验证:
+  - Stage 2 / Stage 3 是否还有新的独立瓶颈
+
+## [2026-03-22 11:52:40] [Session ID: 3515473] 问题: 复用成功的 Stage 1 后,Stage 2 默认 `gpu_kdtree` 因缺少 `torch_kdtree` 立即失败
+
+### 现象
+- 正式命令:
+  - `pixi run python run_reconstruction.py --config.root-path output/flashvsr_reference_xhc_bai --config.mode extensive --config.skip-alignment --config.alignment-run frame_to_model_icp_50_2_offset0_zzisolated_probe_20260322_114420`
+- 日志:
+  - `/tmp/video_to_world_flashvsr_reference_xhc_bai_extensive_stage23_resume_20260322_115020.log`
+- 报错:
+  - `ModuleNotFoundError: No module named 'torch_kdtree'`
+
+### 假设
+- 主假设:
+  - 失败来自 Stage 2 默认 `knn_backend=gpu_kdtree`,而当前环境没有安装 optional 的 `torch_kdtree` 扩展。
+- 备选解释:
+  - 也可能是环境里本来装过,只是当前 pixi 环境路径丢了。
+
+### 验证
+- 动态证据:
+  - `pixi run python` 下 `importlib.util.find_spec('torch_kdtree')` 返回 `None`。
+  - Stage 2 栈顶明确落在 `from torch_kdtree import build_kd_tree`。
+- 静态证据:
+  - `configs/stage2_global_optimization.py` 默认 `knn_backend='gpu_kdtree'`。
+  - `README.md` 把 `torch_kdtree` 标为 optional install。
+  - `algos/global_optimization.py` 算法默认值是 `cpu_kdtree`。
+
+### 原因
+- 已验证结论:
+  - 当前阻塞点是可选加速依赖缺失,不是 Stage 2 算法本体不可运行。
+
+### 修复 / 处置
+- 本轮处置:
+  - 不先冒险现场编译 `torch_kdtree`。
+  - 改为用 `--config.stage2.knn-backend cpu_kdtree` 重启 Stage 2/3。
+
+### 验证结果
+- 已确认失败原因。
+- 待继续验证:
+  - CPU KD-tree 版本的 Stage 2/3 是否能完整推进。
+
+## [2026-03-22 11:56:30] [Session ID: 3515473] 问题: 追加 Markdown 上下文时误用了未加引号 heredoc,触发 shell 反引号命令替换
+
+### 现象
+- 在向 `task_plan.md` / `notes.md` 追加一条包含反引号的记录时,终端出现:
+  - `--config.stage2.knn-backend: 未找到命令`
+  - `torch_kdtree: 未找到命令`
+  - `Training:: 未找到命令`
+- 这是 shell 把 Markdown 里的反引号内容当成命令执行了。
+
+### 假设
+- 主假设:
+  - 使用了未加引号的 heredoc (`cat <<EOF`),导致正文里的反引号片段发生 command substitution。
+
+### 验证
+- 动态证据:
+  - 终端直接报出多条“未找到命令”。
+- 静态证据:
+  - 项目规则明确要求: 只要正文包含反引号,必须使用 `cat <<'EOF'`。
+
+### 原因
+- 已验证结论:
+  - 这是 shell heredoc 使用错误,不是项目代码错误。
+
+### 修复 / 处置
+- 后续所有包含反引号的 Markdown 追加,统一改用:
+  - `cat <<'EOF'`
+- 本轮会重新检查文件尾部,然后用正确写法补一条完整记录。
+
+### 验证结果
+- 已识别出写入错误原因。
+- 待继续验证:
+  - 当前两份上下文文件尾部是否需要补写正确版本。

@@ -309,3 +309,141 @@
 ### 总结感悟
 - GPU OOM 不能一看到就归因于“显存小”。很多时候,真正的问题是对象生命周期、跨进程显存竞争,或者局部实现的平方级中间张量。
 - 回答“机器够不够”时,最好拆成“硬件上限是否低”和“当前代码路径是否把显存用对了”这两个问题分别说清楚。
+## [2026-03-22 02:10:54] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] 任务名称: 启动默认业务配置的 3DGS 正式长跑并挂上显存监控
+
+### 任务内容
+- 基于已经完成的默认 Stage 1 / Stage 2 产物,正式启动 `3dgs + 10000 iter + lpips_weight=0.2 + auto_eval=true` 的业务长跑。
+- 同步记录 GPU 显存曲线,用于判断是否存在新的早期显存风险。
+
+### 完成过程
+- 先确认当前没有残留的 `train_gs` / `run_reconstruction` / `eval_gs` 相关进程占卡。
+- 然后启动正式训练会话,输出目录为 `gs_3dgs_formal_full_20260322_020615`,训练日志写到 `/tmp/video_to_world_formal_gs_longrun_20260322_020615.log`。
+- 同时启动独立 `nvidia-smi` 周期采样,把 GPU 利用率、显存占用和 compute app 写入 `/tmp/video_to_world_formal_gs_longrun_20260322_020604_gpu.log`。
+- 首批观测显示训练已稳定推进到 200+ iter,显存稳定在约 28.37 GiB,未出现新的早期 OOM。
+
+### 总结感悟
+- 对这种长跑任务,最值钱的不是“先把命令敲出去”,而是同时把训练日志和 GPU 采样都挂上,这样后面任何异常都能对时定位。
+- 当前首批动态证据进一步支持: 这台机器并不是一进入默认 GS 正式训练就因显存不足而失败。
+## [2026-03-22 02:47:29] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] 任务名称: 为 GS 正式 resume 能力建立 OpenSpec change
+
+### 任务内容
+- 在当前仓库中初始化 OpenSpec。
+- 创建承载“GS 正式 resume 能力”的规范化 change。
+- 获取第一份 artifact 模板,为后续 proposal 撰写做准备。
+
+### 完成过程
+- 先确认仓库尚未初始化 OpenSpec,因此先执行 `openspec init --tools codex .`。
+- 再创建 change `add-gs-training-resume`,schema 为默认 `spec-driven`。
+- 然后读取 change 状态,确认当前只有 `proposal` 处于 ready 状态。
+- 最后获取 `proposal.md` 的 instructions / template,为下一步产出 proposal 做准备。
+
+### 总结感悟
+- 这一步最重要的是把“resume 能力”从口头需求变成规范化变更单,这样后面的 specs / design / tasks 才有依赖链。
+- 当前仓库还没有 `openspec/specs/`,所以这次 change 也顺带完成了 OpenSpec 基础设施落地。
+## [2026-03-22 04:04:35] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] 任务名称: 使用 openspec-ff-change 完成 `add-gs-training-resume` 全套 artifacts
+
+### 任务内容
+- 将已经创建的 `add-gs-training-resume` change 一次性推进到 apply-ready。
+- 按 spec-driven 顺序生成 proposal、specs、design、tasks。
+
+### 完成过程
+- 先读取当前 change 状态与各 artifact instructions,确认 proposal 是第一步。
+- 再创建 `proposal.md`,明确 resume 的动机、能力边界和影响范围。
+- 接着创建 `specs/gs-training-resume/spec.md` 与 `design.md`,把 resume 能力、checkpoint 结构和下游兼容策略写实。
+- 最后创建 `tasks.md`,把实现拆成配置/检查点、训练流程、下游兼容、验证文档四组任务。
+- 完成后执行 `openspec validate add-gs-training-resume`,确认 change 有效。
+
+### 总结感悟
+- 这次最关键的不是多写几个 Markdown 文件,而是把“resume 能力”从零散想法收敛成可实现、可验证、可拆任务的规范化变更。
+- 由于 checkpoint 格式升级会波及 `eval_gs`、viewer、PLY 导出,在 design 阶段就把兼容性写进去,比实现时临时补锅稳得多。
+
+## [2026-03-22 04:44:54] [Session ID: e7d33bb8-22af-4207-a9b3-224a0f3a3b4e] 任务名称: 启动 `source/flashvsr_reference_xhc_bai` 的 extensive 多视角正式运行并完成首批稳定性验收
+
+### 任务内容
+- 以多视角入口正式启动 `source/flashvsr_reference_xhc_bai/full_scale2x` 的 `extensive` 重建。
+- 输出目录固定到 `output/flashvsr_reference_xhc_bai`。
+- 同步挂载主运行日志与 GPU 采样日志,验证是否真正进入 extensive 主流程。
+
+### 完成过程
+- 先按项目六文件规则完成超长 `task_plan.md` 与 `notes.md` 的续档,并做最小持续学习摘要。
+- 再使用带代理和 `HF_ENDPOINT=https://hf-mirror.com` 的环境启动:
+  - `pixi run python run_multiview_reconstruction.py --views-root source/flashvsr_reference_xhc_bai/full_scale2x --scene-root output/flashvsr_reference_xhc_bai --config.mode extensive`
+- 将主日志写到:
+  - `/tmp/video_to_world_flashvsr_reference_xhc_bai_extensive_20260322_044004.log`
+- 将 GPU 采样写到:
+  - `/tmp/video_to_world_flashvsr_reference_xhc_bai_extensive_gpu_20260322_044004.log`
+- 动态观察确认:
+  - `view_0..view_5` 全部完成 DA3 preprocessing
+  - 联合 `results.npz` 已写出
+  - 管线已进入 `run_reconstruction.py` 的 `Stage 1: Iterative Alignment`
+  - `Back-projecting frames 600/600` 已完成
+  - Stage 1 GPU 实算期间显存已观测到约 `22 GiB`,暂未见 OOM 或 `Traceback`
+
+### 总结感悟
+- 对这类超长管线,真正有价值的不是“把命令敲出去”,而是同时拿到主日志、输出目录快照和 GPU 采样三份证据。
+- 这次动态证据已经说明 extensive 入口选择和输出目录设置是对的,当前风险已从“能不能启动”切换到“后续长跑会不会在中后段暴露新阻塞”。
+
+## [2026-03-22 10:50:28] [Session ID: 1774147758-2955119] 任务名称: 说明 run_multiview_reconstruction 的视频帧采样语义
+
+### 任务内容
+- 核对多视角入口在视频源输入下,是否对视频逐帧全量处理。
+- 确认真实控制采样的脚本、参数和默认值。
+
+### 完成过程
+- 先读取 `run_multiview_reconstruction.py`,确认它只负责编排,不会自己解视频。
+- 再读取 `preprocess_multiview.py`,确认它会对每个视角独立调用 `preprocess_video.py`。
+- 最后读取 `preprocess_video.py`,确认流程是“ffmpeg 全量解帧 -> subsample_frames 选帧 -> 仅对 frames_subsampled 跑 DA3”。
+
+### 总结感悟
+- 这个入口的“采样”发生在预处理阶段,不是发生在后续重建阶段。
+- 回答这类问题时,要区分“视频是否先被逐帧解码”与“后续算法是否逐帧全量消费”这两个不同层面。
+
+## [2026-03-22 10:53:58] [Session ID: 1774147758-2955119] 任务名称: 核对 flashvsr 多视角数据的默认采样实际取帧
+
+### 任务内容
+- 对真实数据 `source/flashvsr_reference_xhc_bai/full_scale2x` 核对默认采样到底选中了哪些帧。
+- 给出每个视角的实际用帧数量、stride 和尾部被丢弃的范围。
+
+### 完成过程
+- 读取 `output/flashvsr_reference_xhc_bai/preprocess_frames.json` 与各视角 `per_view/view_*/preprocess_frames.json`。
+- 统计每个视角 `frames/` 与 `frames_subsampled/` 的真实文件数量,确认每个视角都是 121 -> 100。
+- 再对 `frames_subsampled` 和原始 `frames` 做哈希匹配,确认 `frames_subsampled/000000..000099` 实际对应原始 `frames/000001..000100`。
+
+### 总结感悟
+- `max_stride=8` 在这份数据上并没有生效成“每 8 帧取 1 帧”。
+- 真正发生的是: 先判定可以用 stride=1,然后再被 `max_frames=100` 截断成前 100 帧。
+
+## [2026-03-22 11:09:20] [Session ID: 1774147758-2955119] 任务名称: 在 docs/cmd.md 补充 stride 设置命令
+
+### 任务内容
+- 在命令手册里加入 Stage 0 视频预处理 stride 的设置方法。
+- 给出多视角入口、联合预处理、单视频预处理三种可直接复制的命令。
+
+### 完成过程
+- 先读取 `docs/cmd.md` 当前内容与 `README.md` 的相关段落。
+- 再核对 `run_multiview_reconstruction.py`、`preprocess_multiview.py`、`preprocess_video.py` 的真实参数名。
+- 然后在 `docs/cmd.md` 中新增小节,补上命令示例和参数区别,并补充 Stage 1 stride 的区分说明。
+
+### 总结感悟
+- 文档里只给参数名不够,必须把“入口不同,参数名不同”写清楚,否则用户很容易把 `--preprocess-max-stride` 和 `--config.alignment.stride` 混在一起。
+- 这次还顺手把 `max_stride` 不是“固定隔帧”的语义写进去了,能减少后续误判。
+
+## [2026-03-22 12:01:40] [Session ID: 3515473] 任务名称: 推动 `source/flashvsr_reference_xhc_bai` 的正式 extensive 运行越过 Stage 3.1 并进入 2DGS 训练
+
+### 任务内容
+- 继续推进 `output/flashvsr_reference_xhc_bai` 的正式 extensive 管线。
+- 不降低 Stage 1 质量,复用已验收成功的 Stage 1 结果继续跑 Stage 2/3。
+- 在遇到新阻塞时,只处理新的真实阻塞点,不回退到已修掉的旧 OOM 问题。
+
+### 完成过程
+- 先复核并确认 isolated-worker 版 Stage 1 probe 已完整跑通到 `Frame 49/49`。
+- 再复用该 Stage 1 输出,用 `--config.skip-alignment --config.alignment-run ...` 正式切入 Stage 2/3。
+- Stage 2 首次因缺少 optional 的 `torch_kdtree` 失败后,确认 `gpu_kdtree` 只是默认加速后端,随即切到 `cpu_kdtree` 继续。
+- 重新启动后,Stage 2 global optimization 成功推进并完成。
+- 随后 Stage 3.1 inverse deformation 完成训练与 round-trip validation。
+- 当前已正式进入 `Stage 3.2: 2DGS Training`。
+
+### 总结感悟
+- 当前这台机器并不是“显卡绝对不够跑 extensive”。
+- 真实结论是: Stage 1 之前被 RoMa 单进程 GPU 状态累计拖死; Stage 2 之前被 optional GPU KD-tree 依赖阻塞。
+- 这两处分别修正后,正式 extensive 已经能推进到 GS 长跑阶段。

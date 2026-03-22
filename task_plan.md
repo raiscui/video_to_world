@@ -1,974 +1,811 @@
-# 任务计划: 继续调通 pixi run setup
+# 任务计划: 启动 `source/flashvsr_reference_xhc_bai` 的 extensive 多视角正式运行
 
-## [2026-03-21 23:47:00] [Session ID: codex-20260321-234700] [记录类型]: 续档后接手 tiny-cuda-nn 的 CUDA 编译问题
+## [2026-03-22 04:39:30] [Session ID: e7d33bb8-22af-4207-a9b3-224a0f3a3b4e] [记录类型]: 新任务续档初始化
 
 ### 背景承接
-- 旧任务计划已续档到 `task_plan_2026-03-21_234700.md`,避免继续在超长文件里追加导致上下文失控。
-- 前一轮已验证:
-  - `pixi run setup` 前面的 `install-torch-stack`、`setup-depth-anything-3`、`install-gsplat`、`pin-build-setuptools` 已通过。
-  - 当前真实阻塞收敛到 `install-tinycudann` 的本地编译阶段。
-  - tiny-cuda-nn 已经不再卡在 GitHub 拉取或子模块获取,而是暴露出 CUDA 工具链环境问题。
+- 旧的 `task_plan.md` 与 `notes.md` 已超过 1000 行,本轮按项目规则续档。
+- 已完成最小持续学习检索,并回读了默认六文件与相关历史文件。
+- 已确认 `source/flashvsr_reference_xhc_bai/full_scale2x` 是多视角输入,应走 `run_multiview_reconstruction.py`。
+- 用户要求使用 `extensive` 模式,输出目录固定到当前项目下的 `output/flashvsr_reference_xhc_bai`。
 
 ### 目标
-- 找出 tiny-cuda-nn 当前编译失败时缺失的 CUDA 环境暴露点。
-- 修复 `scripts/install_tinycudann.sh`,让 `pixi run install-tinycudann` 能正确识别 CUDA 并继续构建。
-- 继续验证 `pixi run setup`,直到通过或收敛出新的真实阻塞点。
+- 正式启动 `source/flashvsr_reference_xhc_bai` 的 `extensive` 多视角重建。
+- 将日志、首批输出、进程状态和首个真实阻塞记录清楚。
+- 如果运行成功进入主流程,继续保留可追踪的日志与会话信息。
 
 ### 现象
-- 已观察到的真实报错包括:
-  - `sh: 1: nvcc: not found`
-  - `#error C++17 or later compatible compiler is required to use PyTorch`
-  - `fatal error: nvrtc.h: No such file or directory`
-  - `fatal error: cusparse.h: No such file or directory`
-- 同一轮构建日志里后续又出现了 `/usr/local/cuda/bin/nvcc`,这说明机器上大概率已有 CUDA,只是没有被 tiny-cuda-nn 的构建探测链路稳定识别。
+- 当前 `output/` 目录为空,目标输出目录尚未存在可复用产物。
+- 当前 GPU 空闲,仅有约 `396 MiB` 基础占用,没有重建相关 compute app。
+- 之前已验证多视角入口会把额外参数透传给 `run_reconstruction.py`,因此 `--config.mode extensive` 应可生效。
 
 ### 主假设
-- 当前主假设是:
-  - CUDA toolkit 已安装,但 `PATH`、`CUDA_HOME`、头文件搜索路径没有在 tiny-cuda-nn 的构建入口前正确导出。
+- 主假设: 直接执行下列命令即可进入正式 extensive 流程:
+  - `pixi run python run_multiview_reconstruction.py --views-root source/flashvsr_reference_xhc_bai/full_scale2x --scene-root output/flashvsr_reference_xhc_bai --config.mode extensive`
 
 ### 最强备选解释
-- 也可能不是单纯的环境变量暴露问题,而是当前 CUDA 安装布局与 tiny-cuda-nn / torch 的 include 约定不一致,需要额外补 `CPATH`、`CPLUS_INCLUDE_PATH` 甚至库路径。
-
-### 最小验证计划
-- 先只验证 4 件事:
-  - `nvcc` 实际在哪里
-  - `nvrtc.h` 实际在哪里
-  - `cusparse.h` 实际在哪里
-  - `/usr/local/cuda` 是否只是符号链接,真实 include 目录是否在 `targets/x86_64-linux/include`
-- 只有确认这些落点后,才对脚本做最小补丁。
+- 备选解释: 运行可能会卡在外部模型下载、Stage 1 显存峰值、或某个 extensive 特有阶段,需要根据首批日志继续收敛。
 
 ### 阶段
-- [x] 阶段1: 承接旧上下文并续档超长任务计划
-- [ ] 阶段2: 验证本机 CUDA 的二进制与头文件布局
-- [ ] 阶段3: 修补 tiny-cuda-nn 安装脚本的 CUDA 环境导出
-- [ ] 阶段4: 运行脚本级、任务级和 setup 级验证
+- [x] 阶段1: 回读上下文并完成续档
+- [ ] 阶段2: 记录启动参数与运行环境
+- [ ] 阶段3: 正式启动 extensive 运行
+- [ ] 阶段4: 验证首批日志、落盘和阻塞点
+- [ ] 阶段5: 更新工作记录并向用户汇报当前进度
 
 ### 状态
-**目前在阶段2** - 正在用最小探针确认 `nvcc`、`nvrtc.h`、`cusparse.h` 的真实路径,避免对 CUDA 布局拍脑袋。
+**目前在阶段2** - 正在写入正式启动记录,马上启动 extensive 会话并挂日志。
 
-## [2026-03-21 23:53:00] [Session ID: codex-20260321-234700] [记录类型]: CUDA 布局验证完成,转入动态环境注入实验
+## [2026-03-22 04:40:04] [Session ID: e7d33bb8-22af-4207-a9b3-224a0f3a3b4e] [记录类型]: 记录正式启动参数与日志路径
 
-### 新证据
-- `nvcc` 实际存在于:
-  - `/usr/local/cuda/bin/nvcc`
-  - `/usr/local/cuda-12.4/bin/nvcc`
-- 当前 shell 的 `PATH` 不包含 `/usr/local/cuda/bin`,因此 `command -v nvcc` 为空。
-- `torch.utils.cpp_extension.CUDA_HOME` 在 `pixi` 环境中返回 `/usr/local/cuda`。
-- 系统 CUDA include 目录下只有基础 runtime 头,未发现 `nvrtc.h` / `cusparse.h`。
-- `nvrtc.h` 与 `cusparse.h` 实际位于 `pixi` 环境:
-  - `site-packages/nvidia/cuda_nvrtc/include`
-  - `site-packages/nvidia/cusparse/include`
-- 对应 `.so` 也位于各自的 `site-packages/nvidia/.../lib` 目录。
-- `tiny-cuda-nn` 的 `bindings/torch/setup.py` 只会:
-  - 通过 `nvcc --version` 决定是否切到 `C++17`
-  - 依赖 `CUDAExtension` 自动推导 CUDA include / lib
-  - 不会主动把上述两个 `site-packages/nvidia/...` 目录加进去
+### 本轮启动配置
+- 入口命令:
+  - `pixi run python run_multiview_reconstruction.py --views-root source/flashvsr_reference_xhc_bai/full_scale2x --scene-root output/flashvsr_reference_xhc_bai --config.mode extensive`
+- 日志文件:
+  - `/tmp/video_to_world_flashvsr_reference_xhc_bai_extensive_20260322_044004.log`
+- GPU 采样日志:
+  - `GPU_/tmp/video_to_world_flashvsr_reference_xhc_bai_extensive_20260322_044004.log`
+- 网络环境:
+  - 启用 `http_proxy` / `https_proxy` 到 `127.0.0.1:7890`
+  - 启用 `all_proxy=socks5://127.0.0.1:7890`
+  - 启用 `HF_ENDPOINT=https://hf-mirror.com`
+
+### 运行前判断
+- 目标输出目录当前无旧内容,可以直接开始。
+- 当前没有重建相关残留进程占用 GPU。
+- extensive 是长任务,因此本轮会保留前台会话并持续观察首批日志。
+
+### 状态
+**目前在阶段3** - 已写入启动参数,下一步正式启动 extensive 会话。
+
+## [2026-03-22 04:42:36] [Session ID: e7d33bb8-22af-4207-a9b3-224a0f3a3b4e] [记录类型]: extensive 会话已成功启动并稳定推进到多视角预处理中段
+
+### 已观察到的现象
+- 正式会话已启动,主 PTY 会话 ID 为 `90694`。
+- 日志文件已落盘:
+  - `/tmp/video_to_world_flashvsr_reference_xhc_bai_extensive_20260322_044004.log`
+- GPU 采样日志已落盘:
+  - `/tmp/video_to_world_flashvsr_reference_xhc_bai_extensive_gpu_20260322_044004.log`
+- 主日志已明确显示:
+  - `Stage 0: preprocess_multiview.py`
+  - `view=0` 到 `view=4` 已依次推进
+- 至少以下 per-view 结果已明确完成:
+  - `view_0/exports/npz/results.npz`
+  - `view_1/exports/npz/results.npz`
+  - `view_2/exports/npz/results.npz`
+  - `view_3/exports/npz/results.npz`
+- 当前尚未观察到 `Traceback`、`[ERROR]` 或下载层卡死。
 
 ### 结论更新
-- 上一条主假设被部分验证:
-  - `nvcc not found` 确实是 `PATH` 暴露不足
-- 同时新增了更具体的子结论:
-  - `nvrtc.h` / `cusparse.h` 缺失不是“机器没有文件”,而是“编译搜索路径没覆盖 `pixi` 环境里的 NVIDIA 开发头和库”
-
-### 下一步最小验证
-- 不先改脚本。
-- 先在单次命令里手动注入:
-  - `PATH=/usr/local/cuda/bin:$PATH`
-  - `CUDA_HOME=/usr/local/cuda`
-  - `CPATH` / `CPLUS_INCLUDE_PATH` 指向系统 CUDA include + `pixi` 环境里的 `cuda_nvrtc/include` 与 `cusparse/include`
-  - `LIBRARY_PATH` / `LD_LIBRARY_PATH` 指向系统 CUDA lib64 + `pixi` 环境里的 `cuda_nvrtc/lib` 与 `cusparse/lib`
-- 如果这样能把构建推进到下一层,就把相同逻辑收敛进 `scripts/install_tinycudann.sh`。
+- 上一条主假设目前被动态证据支持:
+  - 命令、代理和 HF mirror 组合可以把 extensive 会话稳定拉起。
+- 当前最强备选解释仍保留:
+  - 后续仍可能在 Stage 0 合并、Stage 1、ICP、global optimization 或 GS 阶段出现新的真实阻塞。
 
 ### 阶段
-- [x] 阶段1: 承接旧上下文并续档超长任务计划
-- [x] 阶段2: 验证本机 CUDA 的二进制与头文件布局
-- [ ] 阶段3: 修补 tiny-cuda-nn 安装脚本的 CUDA 环境导出
-- [ ] 阶段4: 运行脚本级、任务级和 setup 级验证
+- [x] 阶段1: 回读上下文并完成续档
+- [x] 阶段2: 记录启动参数与运行环境
+- [x] 阶段3: 正式启动 extensive 运行
+- [ ] 阶段4: 验证首批日志、落盘和阻塞点
+- [ ] 阶段5: 更新工作记录并向用户汇报当前进度
 
 ### 状态
-**目前在阶段3** - 正在做“不改脚本、只注入环境变量”的动态证伪实验,确认修复应落在哪一层。
+**目前在阶段4** - extensive 会话已稳定运行,正在继续观察是否完成 Stage 0 并进入后续主流程。
 
-## [2026-03-22 00:03:00] [Session ID: codex-20260321-234700] [记录类型]: 动态环境注入实验推翻“只补两个头文件目录就够”的子假设
+## [2026-03-22 04:44:54] [Session ID: e7d33bb8-22af-4207-a9b3-224a0f3a3b4e] [记录类型]: Stage 0 已完成,Stage 1 已进入 GPU 实算
 
 ### 动态证据
-- 手动导出 `PATH`、`CUDA_HOME`、`CPATH`、`CPLUS_INCLUDE_PATH`、`LIBRARY_PATH`、`LD_LIBRARY_PATH` 后再次运行 `pixi run install-tinycudann`。
-- 构建日志明确显示:
-  - `Detected CUDA version 12.4`
-  - `Targeting C++ standard 17`
-- 这证明:
-  - `nvcc not found` 已被解决
-  - `C++17` 探测问题已被解决
-  - `nvrtc.h` 与 `cusparse.h` 已不再是首个失败点
-- 新的首个真实失败点变成:
-  - `fatal error: cublas_v2.h: 没有那个文件或目录`
-
-### 被推翻的子假设
-- 上一轮的“只补 `cuda_nvrtc` 和 `cusparse` 两组目录就足够”不成立。
-
-### 新主假设
-- `pixi` 环境里应该还安装了更多 NVIDIA wheel,例如 `cublas`。
-- tiny-cuda-nn 需要的不是零散补丁式路径,而是把 `site-packages/nvidia/*/include` 与 `site-packages/nvidia/*/lib` 统一拼到搜索路径中。
-
-### 下一步
-- 先列出 `pixi` 环境中的 `site-packages/nvidia/*` 目录,确认哪些包提供 `include` / `lib`。
-- 如果证据成立,就把脚本改成“自动收集所有 NVIDIA wheel 的 include/lib 路径”,而不是硬编码个别库。
-
-### 状态
-**目前仍在阶段3** - 正在把修复从“局部补路径”收敛成“自动汇总所有 NVIDIA wheel 开发路径”。
-
-## [2026-03-22 00:18:00] [Session ID: codex-20260321-234700] [记录类型]: `pixi run setup` fresh verification 通过
-
-### 已验证结论
-- `scripts/install_tinycudann.sh` 的新逻辑已经能自动:
-  - 暴露 `/usr/local/cuda/bin`
-  - 汇总 `pixi` 环境下 `site-packages/nvidia/*/include`
-  - 汇总 `site-packages/nvidia/*/lib`
-  - 为只有 `libfoo.so.12` 的 NVIDIA wheel 生成临时 `libfoo.so` 链接别名
-  - 通过 `LDFLAGS` 注入运行时 `rpath`
-- 真实命令验证结果:
-  - `bash -n scripts/install_tinycudann.sh` 通过
-  - `python3 -m unittest tests/test_pixi_manifest.py` 通过
-  - `timeout 1800s pixi run install-tinycudann` 通过
-  - `timeout 1800s pixi run setup` 通过
-  - `pixi run python` 内 `import tinycudann as tcnn` 通过
-
-### 关键动态证据
-- 修复前的首错链路:
-  - `nvcc: not found`
-  - `C++17 or later compatible compiler is required to use PyTorch`
-  - `nvrtc.h` / `cusparse.h` 缺失
-- 手动环境注入后,首错推进到:
-  - `cublas_v2.h` 缺失
-- 扩展为“汇总全部 NVIDIA wheel include/lib”后,首错再推进到:
-  - `-lnvrtc` 找不到
-- 补上无版本 `.so` 链接别名与 `rpath` 后:
-  - `tinycudann` 成功构建并安装
-  - `setup` 主链路继续跑完 `setup-romav2`
-
-### 收尾说明
-- 为了让默认 `.envrc` 中的 `TINYCUDANN_LOCAL_REPO=/tmp/video_to_world-tiny-cuda-nn` 立即可用,本轮把它指向了已经验证过的本地 clone:
-  - `/tmp/video_to_world-tiny-cuda-nn -> /tmp/tcnn-clone-test.HtOWVH`
-- 当前没有新的未完成阻塞留在 `setup` 主链上。
-
-### 阶段
-- [x] 阶段1: 承接旧上下文并续档超长任务计划
-- [x] 阶段2: 验证本机 CUDA 的二进制与头文件布局
-- [x] 阶段3: 修补 tiny-cuda-nn 安装脚本的 CUDA 环境导出
-- [x] 阶段4: 运行脚本级、任务级和 setup 级验证
-
-### 状态
-**目前已完成** - `pixi run setup` 已 fresh verification 通过,准备整理错误记录与交付说明。
-
-## [2026-03-22 00:30:00] [Session ID: codex-20260321-234700] [记录类型]: 新任务初始化 - 用 `source/flashvsr_reference_xhc_bai` 做真实测试运行
-
-### 目标
-- 使用真实数据目录 `source/flashvsr_reference_xhc_bai/full_scale2x` 运行联合多视角重建入口。
-- 验证“代码层 dry-run 正常”已经进一步升级为“真实数据链路可启动并继续运行”。
-- 如果运行失败,收敛出新的真实阻塞点; 如果运行成功,记录输出路径和关键产物。
-
-### 当前理解
-- 这套数据目录是:
-  - `full_scale2x/0..5/rgb/*.mp4`
-- 它对应的入口不是单视频脚本,而是:
-  - `run_multiview_reconstruction.py`
-- 按当前文档,最合理的第一条真实测试命令是:
-  - `pixi run python run_multiview_reconstruction.py --views-root source/flashvsr_reference_xhc_bai/full_scale2x --scene-root <test_scene_root> --config.mode fast`
-
-### 主假设
-- 当前主假设是:
-  - 既然 `pixi run setup` 已 fresh verification 通过,这条真实联合入口至少应当能够进入 Stage 0,并继续对真实数据做处理。
-
-### 最强备选解释
-- 也可能环境依赖虽然装好了,但真实数据运行还会暴露:
-  - GPU / 显存不足
-  - 模型权重下载
-  - 某个阶段对真实视频内容或帧数的约束问题
-
-### 最小执行计划
-- 先探针:
-  - `nvidia-smi -L`
-  - 输出目录是否可写
-- 再直接跑真实联合入口:
-  - 使用 `fast` 模式
-  - 使用新的测试 `scene_root`,避免污染旧结果
-
-### 阶段
-- [ ] 阶段1: 确认真实数据目录、GPU 和输出路径
-- [ ] 阶段2: 启动真实联合多视角重建
-- [ ] 阶段3: 记录运行结果、产物和后续建议
-
-### 状态
-**目前在阶段1** - 正在确认真实测试运行的前置条件,随后立刻启动 `source/flashvsr_reference_xhc_bai` 的联合重建。
-
-## [2026-03-22 00:33:00] [Session ID: codex-20260321-234700] [记录类型]: 真实运行前置探针完成
-
-### 新证据
-- `nvidia-smi -L` 返回:
-  - `GPU 0: NVIDIA RTX 6000 Ada Generation`
-- `/tmp` 与 `/workspace` 所在磁盘可用空间约 `1.6T`
-- `source/flashvsr_reference_xhc_bai/full_scale2x` 下确认存在 6 个视角视频:
-  - `0..5/rgb/xhc-bai_97e474c6.mp4`
-- `/tmp` 可写
+- `preprocess_multiview.py` 已对 `view_0..view_5` 全部完成 DA3 preprocessing。
+- 联合预处理总结 JSON 已打印:
+  - `total_frames: 600`
+  - `merged_npz_path: /workspace/video_to_world/output/flashvsr_reference_xhc_bai/exports/npz/results.npz`
+- 入口已继续进入:
+  - `run_reconstruction.py --config.root-path /workspace/video_to_world/output/flashvsr_reference_xhc_bai --config.mode extensive`
+  - `Stage 1: Iterative Alignment`
+  - `python -m frame_to_model_icp --config.root-path ... --config.icp-early-stopping-min-delta 5e-06`
+- Stage 1 已完成 `Back-projecting frames: 600/600`。
+- GPU 采样日志显示 Stage 1 期间出现真实 compute app,显存峰值已观测到约 `22026 MiB`,GPU 利用率达到 `100%`,目前未见 OOM。
 
 ### 结论
-- 当前真实联合运行的基础前提已满足:
-  - 数据存在
-  - GPU 存在
-  - 输出路径可写
-
-### 下一步
-- 直接运行:
-  - `pixi run python run_multiview_reconstruction.py --views-root source/flashvsr_reference_xhc_bai/full_scale2x --scene-root /tmp/video_to_world_joint_scene_xhc_bai_fast_run_20260322 --config.mode fast`
+- 阶段4 已完成:
+  - extensive 不仅成功启动,还已跨过联合预处理,并进入后续主流程的真实 GPU 计算。
+- 当前仍未完成整条 extensive 管线,但已经排除了“启动即失败”“Stage 0 卡死”“刚进 Stage 1 就 OOM”这几类早期风险。
 
 ### 阶段
-- [x] 阶段1: 确认真实数据目录、GPU 和输出路径
-- [ ] 阶段2: 启动真实联合多视角重建
-- [ ] 阶段3: 记录运行结果、产物和后续建议
+- [x] 阶段1: 回读上下文并完成续档
+- [x] 阶段2: 记录启动参数与运行环境
+- [x] 阶段3: 正式启动 extensive 运行
+- [x] 阶段4: 验证首批日志、落盘和阻塞点
+- [ ] 阶段5: 更新工作记录并向用户汇报当前进度
 
 ### 状态
-**目前在阶段2** - 正在启动 `source/flashvsr_reference_xhc_bai` 的真实联合重建。
+**目前在阶段5** - extensive 长跑仍在继续,我已完成首批稳定性验收,正在整理阶段性汇报。
 
-## [2026-03-22 00:37:00] [Session ID: codex-20260321-234700] [记录类型]: 真实运行首个阻塞点已收敛到 Hugging Face 代理层
+## [2026-03-22 10:29:44] [Session ID: e7d33bb8-22af-4207-a9b3-224a0f3a3b4e] [记录类型]: 检查 extensive 长跑是否已经完成
 
-### 已观察现象
-- 真实运行已经成功完成:
-  - Stage 0 第一个视角的视频拆帧
-  - `frames_subsampled` 生成
-  - 进入 `DepthAnything3.from_pretrained(...)`
-- 首个失败点不是算法逻辑,而是模型下载阶段:
-  - 当前 shell 存在 `all_proxy=socks5://127.0.0.1:7897`
-  - `huggingface_hub` / `httpx` 看到 SOCKS 代理后,因为环境里没有 `socksio`,直接报:
-    - `ImportError: Using SOCKS proxy, but the 'socksio' package is not installed`
-- 进一步最小验证显示:
-  - 去掉 `ALL_PROXY`,只用 `http/https` 走 `127.0.0.1:7890` 后,请求已能发起,但又遇到 `SSL EOF`
-  - 机器上也没有已缓存的 `depth-anything/DA3NESTED-GIANT-LARGE` 本地模型目录可直接复用
+### 检查动机
+- 用户刚刚询问“完成了吗”。
+- 该问题属于实时状态判断,不能依赖上一轮的中途观察结果,必须重新核对当前进程、日志和落盘情况。
 
-### 当前结论
-- 真实运行阻塞已从“代码/环境安装问题”推进到“模型下载代理兼容问题”。
-- 当前主修复方向是:
-  - 先让 `httpx` 具备 SOCKS 能力
-  - 再按用户给的 `127.0.0.1:7890` 代理做最小下载验证
+### 最小验证计划
+- 检查主 PTY 会话 `90694` 是否仍在输出。
+- 检查相关进程是否还存活。
+- 检查主日志尾部是否出现成功收尾或错误收尾标记。
+- 检查输出目录是否出现后续阶段产物。
+
+### 状态
+**目前在阶段5** - 正在重新核对 extensive 长跑的当前完成状态。
+
+## [2026-03-22 10:30:30] [Session ID: e7d33bb8-22af-4207-a9b3-224a0f3a3b4e] [记录类型]: extensive 长跑当前未完成,已在 Stage 1 因 RoMa CUDA OOM 退出
+
+### 新动态证据
+- 主 PTY 会话 `90694` 已结束,退出码为 `1`。
+- 当前已无 `run_multiview_reconstruction.py` / `run_reconstruction.py` / `frame_to_model_icp.py` 相关存活进程。
+- 主日志尾部出现明确错误栈:
+  - `torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 200.00 MiB`
+  - 失败位置在 `third_party/RoMaV2/src/romav2/refiner.py`,调用链由 `models/roma_matcher.py -> frame_to_model_icp.py` 触发。
+- 失败时日志进度大约在:
+  - `Frames: 16%|█▋| 8/49`
+  - 已完成 Stage 0 和 Stage 1 前半段,但未完成整个 extensive 流程。
+
+### 结论更新
+- 上一条“extensive 已稳定进入主流程”的判断只对当时的早期阶段成立。
+- 新证据已经推翻“本次 extensive 长跑目前仍在继续”的状态判断。
+- 当前真实结论是:
+  - 这次 `output/flashvsr_reference_xhc_bai` 的 extensive 正式运行 **没有完成**。
+  - 它在 Stage 1 的 RoMa matching / refiner 阶段因 CUDA OOM 失败退出。
 
 ### 下一步
-- 在 `pixi` 环境里安装 `socksio`
-- 用 `HTTP_PROXY=http://127.0.0.1:7890`、`HTTPS_PROXY=http://127.0.0.1:7890`、`ALL_PROXY=socks5://127.0.0.1:7890` 重试 `hf_hub_download`
-- 若成功,立即重跑真实联合入口
+- [ ] 提炼这次 OOM 的静态与动态证据。
+- [ ] 判断是 RoMa 生命周期问题、匹配缓存增长问题,还是 extensive 特定参数导致的峰值过高。
+- [ ] 给出可执行的下一轮处置方案。
 
 ### 状态
-**目前仍在阶段2** - 正在修复 DA3 模型下载所需的代理兼容层,准备继续真实运行。
+**目前仍在阶段5** - 已完成状态核对,当前转入失败原因归档与下一步方案收敛。
 
-## [2026-03-22 00:50:00] [Session ID: codex-20260321-234700] [记录类型]: SOCKS 兼容层已补齐,准备在去代理环境下重跑真实数据
+## [2026-03-22 10:30:59] [Session ID: e7d33bb8-22af-4207-a9b3-224a0f3a3b4e] [记录类型]: 转入 Stage 1 RoMa OOM 的最小证伪排查
 
-### 新证据
-- `pixi` 环境原先确实缺少 `socksio`,已通过:
-  - `timeout 300s env -u ... pixi install`
-  - `timeout 60s env -u ... pixi run python`
-  重新验证为 `socksio_installed=True`
-- 但到 Hugging Face 的最小探针仍显示:
-  - `127.0.0.1:7890` 代理路径会出现 `SSL EOF`
-  - 直连路径在 60 秒窗口内无报错,但也未完成返回
+### 排查目标
+- 先区分这次 OOM 更像单次前向峰值,还是跨帧显存累积。
+- 优先从 `frame_to_model_icp.py`、`models/roma_matcher.py` 与日志中的初始化痕迹入手。
 
-### 当前策略
-- 先不再强推 `7890` 代理。
-- 直接在去掉旧代理变量的环境里,给真实运行更长窗口。
-- 目标是区分:
-  - “只是慢,最终可下”
-  - 还是“外部链路长期不可达”
-
-### 下一步
-- 运行:
-  - `env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy pixi run python run_multiview_reconstruction.py ...`
+### 最小验证计划
+- 检查 RoMa matcher 的初始化位置与生命周期。
+- 检查每帧匹配后是否存在明显的大对象保留。
+- 检查日志里是否有重复初始化或重复缓存增长的迹象。
 
 ### 状态
-**目前仍在阶段2** - 正在做“去代理环境下的真实重跑”验证。
+**目前仍在阶段5** - 正在做 Stage 1 RoMa OOM 的静态证据收集。
 
-## [2026-03-21 20:08:15] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 接手真实测试并先做离线模型可用性证伪
+## [2026-03-22 10:31:41] [Session ID: e7d33bb8-22af-4207-a9b3-224a0f3a3b4e] [记录类型]: 最小静态排查已初步缩小 OOM 怀疑范围
 
-### 背景承接
-- 已继承上一会话的动态证据:
-  - `pixi run setup` 已通过
-  - `source/flashvsr_reference_xhc_bai/full_scale2x` 的真实入口已能启动
-  - 首个真实阻塞落在 `DepthAnything3.from_pretrained("depth-anything/DA3NESTED-GIANT-LARGE")`
-- 上一会话已经证明:
-  - 坏的 `7897` 代理会误导下载链路
-  - `7890` 代理路径也没有稳定下载成功
-  - 去代理直连则出现 `[Errno 101] Network is unreachable`
+### 已观察到的静态证据
+- `frame_to_model_icp.py` 在每帧 RoMa 匹配后都有:
+  - `del roma_matcher`
+  - `torch.cuda.empty_cache()`
+  - `roma_matcher = _create_roma_matcher()`
+- `models/roma_matcher.py::compute_roma_matches_for_frame()` 内部还会在单帧内每 4 个新 pair 后重建一次 matcher。
+- 主日志里也确实出现了每帧重复的:
+  - `Initializing RoMa matcher`
+  - `RoMa matcher initialized successfully`
 
-### 当前目标
-- 继续推进 `source/flashvsr_reference_xhc_bai` 的真实测试运行。
-- 优先确认当前机器是否已经存在可复用的本地 DA3 模型目录或 Hugging Face 缓存。
-- 如果能转成本地模型路径,就绕过当前不稳定的外网下载链路,继续真实运行。
+### 当前判断更新
+- “同一个 matcher 跨帧一直复用导致简单泄漏” 这个解释,目前被新证据削弱了。
+- 当前更值得优先怀疑的是:
+  - 随着 `model_pts` 增长,Stage 1 本体占用逐步抬高,再叠加单次 RoMaV2 refiner 前向峰值,最终在第 8 帧附近触顶 OOM。
+- 这还是候选假设,还不是最终根因结论。
 
-### 现象
-- 已观察到的事实是:
-  - 代码入口和 Stage 0 拆帧并没有失败
-  - 当前失败集中在在线下载 `depth-anything/DA3NESTED-GIANT-LARGE`
-- 还没有证据表明:
-  - 仓库逻辑本身存在新的代码 bug
+### 状态
+**目前仍在阶段5** - 已缩小一层怀疑范围,下一步更适合围绕 Stage 1 中增长性状态做证伪。
+
+## [2026-03-22 10:35:45] [Session ID: e7d33bb8-22af-4207-a9b3-224a0f3a3b4e] [记录类型]: 启动 Stage 1 单阶段动态验证
+
+### 验证目的
+- 不重跑整条 multiview extensive。
+- 直接基于已完成的 Stage 0 产物重跑 `frame_to_model_icp`,确认修复后是否还能在 `frame 8` 左右再次 OOM。
+
+### 验证命令
+- `pixi run python -m frame_to_model_icp --config.root-path output/flashvsr_reference_xhc_bai --config.icp-early-stopping-min-delta 5e-06 --config.out-suffix _oomfix_probe_20260322_103545`
+- 日志:
+  - `/tmp/video_to_world_flashvsr_reference_xhc_bai_stage1_probe_oomfix_probe_20260322_103545.log`
+
+### 状态
+**目前仍在阶段5** - 正在做修复后的最小动态复现验证。
+## [${ts}] [Session ID: 2e546d88-242b-47b8-a6a3-eff09359ded0] [记录类型]: 当前会话接手并继续完整 extensive 正式验证
+
+### 承接判断
+- 已回读当前六文件和上一轮关键结论。
+- 上一轮已经完成代码修复,并用 Stage 1 单阶段 probe 动态证明: 修复后已越过原来 `frame 8` 左右的 OOM 点。
+- 但完整命令 `run_multiview_reconstruction.py --config.mode extensive` 还没有在修复后重新正式跑完。
+
+### 当前会话的最小可证伪计划
+- 先核对当前是否存在残留的 pipeline 进程、旧 PTY 或 GPU 占用。
+- 若没有,就重新启动 `source/flashvsr_reference_xhc_bai` 的完整 extensive 正式运行。
+- 继续观察 Stage 1 是否完整通过,以及后续是否进入 global optimization、inverse deformation、train_gs、eval_gs。
 
 ### 当前主假设
-- 当前主假设是:
-  - 只要本机已有完整 DA3 本地权重目录,就可以通过本地路径继续推进真实测试运行。
+- 主假设: 现在的 RoMa matcher 生命周期修复,足以让本次 extensive 至少穿过上一轮的 Stage 1 OOM 阻塞点。
 
 ### 最强备选解释
-- 也可能本机根本没有可用本地模型。
-- 如果如此,那真实阻塞就仍然是外部 Hugging Face 链路,而不是命令参数问题。
-
-### 最小验证计划
-- 先做 3 个最小探针:
-  - 搜索本机 Hugging Face 缓存和工作区中是否已有 `DA3NESTED-GIANT-LARGE`
-  - 检查仓库 CLI 是否支持直接传入本地 `preprocess_model_name`
-  - 如果存在本地目录,先用最小 `from_pretrained(<local_path>)` 探针验证可加载
-- 只有本地路径可用时,才重跑整条真实流水线。
+- 备选解释: 即使旧 OOM 点已被解除,也可能在 Stage 1 更后段或后续 extensive 特有阶段出现新的显存峰值或其他真实错误。
 
 ### 状态
-**目前仍在阶段2** - 正在先做“本地模型可用性”证伪实验,避免继续盲目消耗长时间真实重跑窗口。
+**目前仍在阶段5** - 当前会话已完成接手登记,下一步先核对现场状态并立即启动完整 extensive 正式长跑。
 
-## [2026-03-21 20:11:30] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 发现可用镜像端点,准备切到真实权重下载
+## [2026-03-22 10:40:00] [Session ID: 2e546d88-242b-47b8-a6a3-eff09359ded0] [记录类型]: 更正上一条接手记录的时间戳写入错误
 
-### 新证据
-- 本地缓存搜索结果:
-  - 没有发现现成的 `DA3NESTED-GIANT-LARGE` 权重目录
-  - 只在 Hugging Face cache 中新增了通过镜像下载到的 `config.json`
-- 代码入口确认:
-  - `run_multiview_reconstruction.py` 支持 `--preprocess-model-name`
-  - `preprocess_video.py` 的参数说明已明确支持 "HuggingFace repo or local"
-- 最关键的新动态证据:
-  - 去掉代理后,`hf_hub_download(..., endpoint='https://hf-mirror.com', filename='config.json')` 成功
-  - 同样条件下,`hf_hub_download(..., dry_run=True, filename='model.safetensors')` 成功返回:
-    - `commit_hash=8615eefb62f2db4f8d6ebaa59160086981672829`
-    - `file_size=6759558100`
-- 对比失败证据:
-  - `7890` 代理路径访问官方域名与镜像域名都会稳定出现 `SSL EOF`
+### 现象
+- 上一条追加记录的标题被误写成了 `## [${ts}] ...`。
+- 原因是为了满足“正文含反引号时使用单引号 heredoc”这条规则,导致 shell 变量没有展开。
 
-### 结论更新
-- 上一轮“整条外部模型下载链路都不可用”的口径不成立。
-- 当前更准确的结论是:
-  - 官方 Hugging Face 域名在当前环境不可用
-  - `hf-mirror.com` 在去代理条件下对 `huggingface_hub` 是可用的
-
-### 下一步
-- 先在 `HF_ENDPOINT=https://hf-mirror.com` 条件下真实下载 `model.safetensors`
-- 下载完成后立刻重跑:
-  - `pixi run python run_multiview_reconstruction.py --views-root source/flashvsr_reference_xhc_bai/full_scale2x --scene-root <test_scene_root> --config.mode fast`
+### 纠正方式
+- 保留错误记录原样不删,避免破坏 append-only 上下文。
+- 从本条开始以正确时间戳继续推进当前会话记录。
 
 ### 状态
-**目前仍在阶段2** - 已把问题收敛到“镜像下载 + 真实重跑”,不再继续围绕坏代理做无效尝试。
+**目前仍在阶段5** - 接手记录已纠正,下一步开始核对现场进程、GPU 占用和当前输出状态。
 
-## [2026-03-21 20:51:53] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 上轮中断后恢复下载,确认已有 4.66 GiB 续传基础
+## [2026-03-22 10:40:38] [Session ID: 2e546d88-242b-47b8-a6a3-eff09359ded0] [记录类型]: 现场核对完成,当前可以安全发起新一轮正式运行
 
-### 新证据
-- 上一轮被用户中断后:
-  - 原下载进程 session 已不存在
-  - 但 Hugging Face cache 中保留了:
-    - `4655677440` 字节的 `model.safetensors.incomplete`
-- 这说明:
-  - `HF_ENDPOINT=https://hf-mirror.com` 的真实下载路径仍然成立
-  - 只是进程被中途打断,不是链路重新失败
+### 已验证事实
+- 当前没有存活的 `run_multiview_reconstruction.py` / `run_reconstruction.py` / `frame_to_model_icp.py` / `train_gs.py` / `eval_gs.py` 进程。
+- 当前 GPU 只有桌面进程基础占用,显存约 `396 MiB / 49140 MiB`,不存在上轮残留计算负载。
+- 目标目录 `output/flashvsr_reference_xhc_bai` 已保留 Stage 0 产物,并保留了上轮失败的 `frame_to_model_icp_50_2_offset0` 与本轮 probe 的 `frame_to_model_icp_50_2_offset0_oomfix_probe_20260322_103545`。
+- probe 日志尾部已清楚显示: 修复后至少稳定推进到 `frame 11`,明显越过了原来 `frame 8` 左右的 OOM 点。
 
-### 当前结论
-- 当前最合适的下一步不是重新排查代理。
-- 而是:
-  - 在同样的去代理 + `HF_ENDPOINT=https://hf-mirror.com` 条件下恢复下载
-  - 下载完成后立刻继续 `source/flashvsr_reference_xhc_bai` 的真实联合运行
+### 当前判断
+- 现场状态允许重新发起正式长跑。
+- 但正式发起前还需要确认主入口对已有输出目录的处理策略,避免旧失败产物污染本轮验证。
 
 ### 状态
-**目前仍在阶段2** - 正在从上轮中断点恢复 DA3 大权重下载,随后继续真实测试运行。
+**目前仍在阶段5** - 现场核对完成,下一步检查主入口对已有输出目录的行为,然后立即启动新的 extensive 正式运行。
 
-## [2026-03-21 20:51:53] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 按用户要求切换为先查 ModelScope 可用性
+## [2026-03-22 10:41:55] [Session ID: 2e546d88-242b-47b8-a6a3-eff09359ded0] [记录类型]: 确认正式续跑必须规避旧 probe 目录干扰
 
-### 触发原因
-- 用户新增要求:
-  - 遇到 Hugging Face 模型下载时,先检查 `https://modelscope.cn/` 是否已有对应模型
-  - 如果我这边不会找或找不到,需要明确告诉用户
-
-### 已观察现象
-- `modelscope.cn` 公开搜索页是前端渲染,直接 `curl` 只能拿到壳页面,拿不到结果列表。
-- 通过 `opensearch.xml` 可以确认官方搜索入口是:
-  - `https://www.modelscope.cn/search?search=...`
-- 通过站外检索当前能稳定找到的相关 ModelScope 页面包括:
-  - `https://modelscope.cn/models/onnx-community/depth-anything-v3-small`
-  - `https://modelscope.cn/models/depth-anything/Metric-Video-Depth-Anything-Base`
-  - `https://modelscope.cn/models/cubeai/depth_anything_vitl14`
-- 但到目前为止,还没有找到与当前代码精确匹配的:
-  - `depth-anything/DA3NESTED-GIANT-LARGE`
-
-### 当前结论
-- 当前不能把“ModelScope 上没有”说死。
-- 更准确的说法是:
-  - 我这边目前能找到若干相关 `depth-anything` 模型
-  - 但还没查到当前流水线所需的精确 DA3 模型页面
-
-### 下一步
-- 先把当前查找结论和已找到的相关链接告诉用户。
-- 如果用户能提供更准确的 ModelScope 链接,我就转为走 ModelScope 或本地目录继续跑 `source/flashvsr_reference_xhc_bai`。
-
-## [2026-03-21 21:36:41] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 按用户要求继续 hf-mirror,确认 DA3 权重已完整落盘
-
-### 新证据
-- 当前没有残留下载进程在跑。
-- Hugging Face cache 中已经出现完整文件:
-  - `6759558100 /root/.cache/huggingface/hub/models--depth-anything--DA3NESTED-GIANT-LARGE/blobs/8899...`
-- 对应 snapshot 目录也已存在:
-  - `snapshots/8615eefb62f2db4f8d6ebaa59160086981672829/`
-  - 其中 `config.json` 和 `model.safetensors` 都已经正确链接到 `blobs/`
-
-### 结论更新
-- 当前真实阻塞已经不再是 DA3 大权重下载。
-- 下一步应该转成:
-  - 先用本地 snapshot 目录做一次最小 `from_pretrained` 加载验证
-  - 验证通过后,直接重跑 `source/flashvsr_reference_xhc_bai` 的真实联合入口
-
-### 状态
-**目前仍在阶段2** - 正在把“镜像下载成功”推进为“本地模型可加载 + 真实运行继续”。
-
-## [2026-03-21 21:37:30] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 本地 snapshot 加载验证通过,切换到离线 DA3 真实重跑
-
-### 新证据
-- `hf_hub_download(..., local_files_only=True)` 已能直接返回本地 `model.safetensors` 路径。
-- `DepthAnything3.from_pretrained('/root/.cache/huggingface/hub/models--depth-anything--DA3NESTED-GIANT-LARGE/snapshots/8615eefb62f2db4f8d6ebaa59160086981672829')` 已真实成功。
-- 输出确认:
-  - `Loading weights from local directory`
-  - `MODEL_NAME da3nested-giant-large`
-
-### 当前结论
-- DA3 这一层已经可以完全离线运行,不需要再碰 Hugging Face 在线路径。
-
-### 下一步
-- 使用新的干净 `scene_root`
-- 显式传入本地 `--preprocess-model-name <snapshot_dir>`
-- 直接重跑 `source/flashvsr_reference_xhc_bai/full_scale2x`
-
-### 状态
-**目前仍在阶段2** - 正在切到“本地 DA3 离线模式”的真实联合重跑。
-
-## [2026-03-21 21:57:14] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 联合预处理已全通,新的首阻塞转移到 RoMaV2 权重下载
-
-### 已验证现象
-- `source/flashvsr_reference_xhc_bai/full_scale2x` 的 6 个视角都已完成:
-  - 本地 DA3 加载
-  - `results.npz`
-  - `gs_video`
-- 联合 `preprocess_multiview_summary.json` 已成功写出,总帧数 `600`
-- `run_reconstruction.py` 已进入 Stage 1:
-  - `frame_to_model_icp` 正在运行
-- 新的首个外部下载点是:
-  - `https://github.com/Parskatt/RoMaV2/releases/download/weights/romav2.pt`
-- 当前真实下载速度只有约 `9-19 kB/s`,且本机无现成 `romav2.pt`
-
-### 当前结论
-- 这说明 Hugging Face / DA3 层已不再是阻塞。
-- 当前真实阻塞已经转移到 RoMaV2 的 GitHub 权重下载。
-
-### 测试运行优先策略
-- 对“先把这套数据跑起来做测试”而言,继续硬等 1GB 的 RoMaV2 权重并不划算。
-- 代码中已确认存在正式开关:
-  - `--config.stage1.roma.use-roma-matching false`
-- 因此下一步采用:
-  - 停掉当前几乎不可用的 RoMaV2 下载
-  - 复用已完成的 Stage 0 输出
-  - 重新运行 `run_reconstruction.py`
-  - 关闭 RoMa matching
-  - 用新的 `stage1.out_suffix` 隔离结果
-
-### 状态
-**目前仍在阶段2** - 正在从“完整质量路径”切换到“测试运行优先路径”,以避免再被外部大文件下载拖住。
-## [2026-03-21 21:59:55] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 从已完成的联合 Stage 0 继续推进后半程测试运行
-
-### 当前现象
-- `source/flashvsr_reference_xhc_bai/full_scale2x` 的联合 Stage 0 已真实跑通。
-- 当前新的首阻塞不是 Hugging Face,而是 Stage 1 默认会下载 GitHub 上的 `romav2.pt`。
-- 现有场景根目录下已经有一次未完成的 `frame_to_model_icp_50_2_offset0`,因此继续测试时要避免把新运行结果和旧残留混在一起。
-
-### 当前假设
-- 主假设:
-  - 直接复用已经成功的联合 Stage 0 输出,并在 `run_reconstruction.py` 中正式关闭 RoMa matching,可以绕过外部 1GB 权重下载,继续推进真实测试运行。
-- 备选解释:
-  - 即使关闭 RoMa matching,Stage 1 或后续训练阶段仍可能暴露新的运行时问题。
-
-### 最小验证计划
-- 先快速复核 CLI 布尔参数和输出后缀参数是否可用。
-- 再用新的 `stage1.out_suffix` 启动真实运行,避免污染已有半成品目录。
-- 运行期间持续观察日志,确认是否成功生成新的 Stage 1 输出目录并继续进入后续阶段。
-
-### 状态
-**目前仍在阶段3** - 正在基于已完成的联合 Stage 0 结果,推进“关闭 RoMa matching 的后半程真实测试运行”。
-## [2026-03-21 22:13:00] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: Stage 1 与 Stage 3.1 已通,Stage 3.2 转入“去 LPIPS 下载”的测试跑策略
-
-### 已验证现象
-- 关闭 RoMa matching 后,新的 Stage 1 目录 `frame_to_model_icp_50_2_offset0_nroma_20260321_2201` 已真实成功产出。
-- `inverse_deformation` 目录及 round-trip validation 产物已真实落盘,说明 Stage 3.1 也已完成。
-- 新的首阻塞转移到 Stage 3.2:
-  - `train_gs` 在 `lpips_weight > 0` 时会调用 `lpips.LPIPS(net='vgg')`
-  - 这会触发 `download.pytorch.org/models/vgg16-397923af.pth`
-  - 当前下载速度只有约 `0.1~0.2 MB/s`,不足以作为“测试运行优先”路径
-
-### 当前假设
-- 主假设:
-  - 对“先把这套数据测试跑通”而言,直接复用已完成的 Stage 1 + Stage 3.1 输出,并在 `train_gs` 中正式把 `lpips_weight` 设为 `0`,可以绕过 VGG 下载并继续验证 Stage 3.2 的核心训练链路。
-- 备选解释:
-  - 即使关闭 LPIPS 下载,Stage 3.2 仍可能在渲染器、显存或自动评估阶段暴露新的运行时问题。
-
-### 下一步最小验证
-- 不再重跑 Stage 1 / Stage 3.1。
-- 直接调用 `train_gs`:
-  - 指向已落盘的 `run` 与 `inverse_deformation`
-  - 使用新的 `out_dir` 隔离被中断的默认 `gs_3dgs` 目录
-  - 设置 `lpips_weight=0`
-  - 缩短 `num_iters`,以测试跑为优先
-
-### 状态
-**目前仍在阶段3** - 已经把阻塞从 RoMaV2 下载推进到 VGG16 下载,正在改走“Stage 3.2 去 LPIPS 下载”的快速验证路径。
-## [2026-03-21 22:12:38] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 后半程测试运行已拿到可交付结果
-
-### 已完成事项
-- [x] 复用联合 Stage 0 结果继续推进后半程
-- [x] 关闭 RoMa matching,真实跑通新的 Stage 1
-- [x] 确认 Stage 3.1 `inverse_deformation` 已真实落盘
-- [x] 关闭 LPIPS 下载阻塞,完成一轮短程 Stage 3.2 真实训练
-- [x] 收集日志证据并核对关键产物文件
-
-### 当前状态
-**目前在阶段4** - 已经拿到 `source/flashvsr_reference_xhc_bai` 的后半程真实测试结果,正在整理交付说明与后续建议。
-## [2026-03-21 22:14:40] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 用户选择方案1,转入补齐 RoMaV2 / VGG16 缓存并重跑默认全量路径
-
-### 用户选择
-- 用户选择上一轮给出的方案 `1`:
-  - 补齐 `romav2.pt` 和 `vgg16-397923af.pth` 本地缓存
-  - 然后重新跑默认全量路径
-
-### 当前现象
-- 当前测试路径已经证明 Stage 0 / 1 / 3.1 / 3.2 核心链路可运行。
-- 但默认全量路径仍会被两个在线权重下载拖住:
-  - `romav2.pt`
-  - `vgg16-397923af.pth`
-
-### 当前假设
-- 主假设:
-  - 只要先把这两个大权重补进本地缓存,默认全量路径就能继续推进,不再被网络层频繁打断。
-- 备选解释:
-  - 即使权重补齐,默认长跑仍可能在更后面的长训练阶段暴露新的资源或运行时问题。
-
-### 下一步最小验证
-- 先确认本机当前缓存现状与代码实际读取路径。
-- 再判断最稳的补齐方式: 本地已有副本 / 官方源续传 / 可验证的镜像源。
-- 权重补齐后,重新发起默认全量路径重跑。
-
-### 状态
-**目前仍在阶段3** - 正在把“测试跑已通”推进到“默认全量路径可继续执行”。
-## [2026-03-21 22:35:00] [Session ID: codex-20260321-223500] [记录类型]: 接手默认全量路径重跑,先清理残留探针并验证 DINOv3 torch hub 缓存阻塞
-
-### 背景承接
-- 用户已选择方案 `1`:
-  - 补齐 `romav2.pt`
-  - 补齐 `vgg16-397923af.pth`
-  - 然后重跑默认全量路径
-- 上一轮会话已经完成:
-  - `romav2.pt` 本地缓存
-  - `vgg16-397923af.pth` 本地缓存
-  - 一个最小初始化探针,并观察到新的首阻塞转移到 DINOv3 的 torch hub GitHub zip 下载
-- 当前会话先确认了旧探针残留进程,并已清理完成。
-
-### 当前现象
-- 已观察到的事实:
-  - `RoMaV2(RoMaV2.Cfg(compile=False))` 还会触发 `torch.hub` 拉取 `facebookresearch/dinov3` 的固定 commit zip
-  - `romav2.pt` 与 `vgg16-397923af.pth` 已不再是首个缺失项
-  - 现场目前没有残留的 `run_reconstruction` / `train_gs` / `torch hub` 相关进程
-
-### 当前假设
-- 主假设:
-  - 只要预热好 DINOv3 的 torch hub 缓存,最小初始化就能离线通过,默认全量路径也能越过新的下载阻塞点。
-- 备选解释:
-  - 即使 zip 缓存补齐,torch hub 仍可能因为解压目录命名或后续权重逻辑再次触发联网。
-
-### 最小验证计划
-- 先读本地代码和缓存目录,确认 torch hub 对 DINOv3 的期望缓存文件名与目录名。
-- 再用最小方式补齐 DINOv3 repo cache,优先避免直接长时间卡在 GitHub 官方下载。
-- 然后重跑最小初始化探针:
-  - `RoMaV2(RoMaV2.Cfg(compile=False))`
-  - `lpips.LPIPS(net='vgg')`
-- 若探针通过,再准备 fresh scene root 并发起默认全量路径重跑。
-
-### 状态
-**目前在阶段3** - 正在把默认全量路径的首阻塞从 `romav2.pt / vgg16` 进一步推进到 `DINOv3 torch hub cache` 层。
-## [2026-03-21 22:37:30] [Session ID: codex-20260321-223500] [记录类型]: DINOv3 torch hub 缓存已补齐,转入 fresh root 的默认全量路径重跑
+### 新静态证据
+- `frame_to_model_icp.py` 默认输出目录是固定命名,不会自动清空旧目录。
+- `run_reconstruction.py` 在 Stage 1 完成后,只是按前缀 `frame_to_model_icp_` 搜索并选择字典序最后一个目录。
+- 当前输出根目录里已经存在 probe 目录 `frame_to_model_icp_50_2_offset0_oomfix_probe_20260322_103545`。
 
 ### 已验证结论
-- `romav2.pt` 本地缓存有效
-- `vgg16-397923af.pth` 本地缓存有效
-- `facebookresearch_dinov3_adc254450203739c8149213a7a69d8d905b4fcfa` 已手动预热到 `/root/.cache/torch/hub`
-- 最小初始化探针已经成功输出:
-  - `roma_model_ok RoMaV2`
-  - `lpips_ok LPIPS`
-- 当前默认全量路径已越过此前三个外部下载阻塞:
-  - DA3 / HF
-  - `romav2.pt`
-  - `vgg16-397923af.pth`
-  - DINOv3 torch hub repo zip
-
-### 下一步最小验证
-- 不直接复用混有旧 Stage 1 / 测试 Stage 3 目录的 scene root。
-- 先从 `/tmp/video_to_world_joint_scene_xhc_bai_fast_run_local_da3_20260321_2142` 裁出一个 fresh root,只保留 Stage 0 所需产物。
-- 然后在 fresh root 上运行默认参数的:
-  - `pixi run python run_reconstruction.py --config.root-path <fresh_root> --config.mode fast`
-- 持续观察它是否真正进入:
-  - 默认 Stage 1 RoMa matching
-  - 默认 Stage 3.2 LPIPS 路径
+- 如果直接用默认 Stage 1 目录名重跑,Stage 2/3 可能接错到 probe 目录,这会污染本轮正式验证。
+- 本轮正式续跑应改为直接调用 `run_reconstruction.py --config.root-path output/flashvsr_reference_xhc_bai --config.mode extensive`,并显式加一个新的 `--config.stage1.out-suffix`。
+- 为了确保 `_find_subdir()` 选中的一定是这次新目录,后缀应以 `z` 开头,让它按字典序排在 probe 目录之后。
 
 ### 状态
-**目前仍在阶段3** - 外部缓存阻塞已解除,正在把验证推进到“fresh root 上的默认全量路径真实重跑”。
-## [2026-03-21 22:42:30] [Session ID: codex-20260321-223500] [记录类型]: 默认全量路径已越过下载层,新的首阻塞变为 RoMa sampling 的 CUDA OOM
+**目前仍在阶段5** - 已明确正式续跑命令策略,下一步启动带唯一 `out_suffix` 的完整 extensive 续跑。
 
-### 已验证现象
-- 默认 `run_reconstruction.py --config.mode fast` 已成功进入真实的 RoMa matching 路径。
-- 失败不再发生在缓存或下载阶段。
-- 当前首个失败点是:
-  - `third_party/RoMaV2/src/romav2/romav2.py:529`
-  - `torch.cdist(x, x)`
-  - `torch.OutOfMemoryError`
-- 失败时 GPU 状态明确显示只剩约 `442.88 MiB` 空闲显存,而该步还想额外申请约 `764 MiB`。
+## [2026-03-22 10:42:27] [Session ID: 2e546d88-242b-47b8-a6a3-eff09359ded0] [记录类型]: 已启动修复后的 extensive 正式续跑会话
 
-### 当前假设
-- 主假设:
-  - 默认 RoMa sampling 配置对当前场景过重,需要通过已有正式配置先收敛显存占用。
-- 备选解释:
-  - RoMa / ICP 中间状态可能存在逐帧累积,导致显存不是单次峰值而是逐步堆积。
+### 启动信息
+- 主 PTY 会话 ID: `35731`
+- 主日志:
+  - `/tmp/video_to_world_flashvsr_reference_xhc_bai_extensive_resume_20260322_104213.log`
+- GPU 日志:
+  - `/tmp/video_to_world_flashvsr_reference_xhc_bai_extensive_resume_gpu_20260322_104213.log`
+- 实际执行命令:
+  - `pixi run python run_reconstruction.py --config.root-path output/flashvsr_reference_xhc_bai --config.mode extensive --config.stage1.out-suffix _zzextensive_rerun_20260322_104213`
 
-### 下一步最小验证
-- 先查明默认 RoMa sampling 相关配置和释放路径。
-- 再决定是“正式参数降采样”还是“代码层修复显存累积”。
+### 选择理由
+- 直接复用已完成的 Stage 0 产物,避免重复预处理。
+- 通过新的 `out_suffix` 规避旧 probe 目录对 `_find_subdir()` 的干扰。
 
 ### 状态
-**目前仍在阶段3** - 默认全量路径的外部缓存问题已解决,正在收敛新的运行时首阻塞 `RoMa CUDA OOM`。
-## [2026-03-21 23:31:00] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 继续默认 RoMa 路径显存修复验证,先打通本地单测再重跑真实 Stage 1
+**目前仍在阶段5** - 会话已启动,正在观察早期日志,重点确认新的 Stage 1 目录被正确创建并进入真实 GPU 计算。
 
-### 当前已知现象
-- `romav2.pt`、`vgg16-397923af.pth`、DINOv3 torch hub 缓存都已补齐。
-- 默认全量路径已经越过下载层,新的首阻塞是 RoMa 阶段 CUDA OOM。
-- 当前代码已落下一版“历史状态下沉 CPU + 按需迁移回 GPU”的修法,但还没完成 fresh verification。
+## [2026-03-22 10:44:18] [Session ID: 2e546d88-242b-47b8-a6a3-eff09359ded0] [记录类型]: 正式 extensive 长跑已穿过旧 OOM 断点并继续推进
+
+### 新动态证据
+- 当前正式会话 `35731` 已稳定推进到 `frame 12`。
+- 日志已明确显示:
+  - `Frames: 22%|██▏| 11/49 ... model_pts=811221`
+  - 随后继续进入 `Rigid ICP f00012` 和 `Non-rigid ICP f00012`。
+- 上一轮失败发生在大约 `frame 8/49`,而这次已经明显越过该位置,并且没有再次出现 `torch.OutOfMemoryError`。
+
+### 已验证结论
+- RoMa matcher 生命周期修复不只是对单阶段 probe 有效。
+- 它已经在正式 `run_reconstruction.py --config.mode extensive` 长跑里成功消除了原来的早期 Stage 1 OOM 断点。
+
+### 状态
+**目前仍在阶段5** - 已完成对旧 OOM 点的正式证伪,接下来继续等待 Stage 1 是否完整结束并进入 Stage 2。
+
+## [2026-03-22 10:45:08] [Session ID: 2e546d88-242b-47b8-a6a3-eff09359ded0] [记录类型]: 正式长跑在更后段再次出现新的 RoMa OOM,分析阶段切换
+
+### 新现象
+- 正式会话 `35731` 已经越过旧的 `frame 8` OOM 点,但最终仍在 `frame 13` 左右退出。
+- 新报错不再落在上一轮的 refiner 分支,而是落在 `third_party/RoMaV2/src/romav2/romav2.py::kde()` 内部的 `torch.cdist(x, x)`。
+- 本次报错为:
+  - `torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 764.00 MiB`
+- 失败前日志位置大约是:
+  - `Frames: 27%|██▋| 13/49`
+  - 随后进入 `Rigid ICP f00014` 后再次开始 `RoMa matching...`
+
+### 口径回滚
+- 上一条“正式 extensive 长跑已消除原来的早期 Stage 1 OOM 断点”仍然成立。
+- 但它不能被扩大解释成“Stage 1 已整体稳定”。
+- 新证据已经明确推翻“当前 Stage 1 足以完整跑完”的更强说法。
+
+### 下一步
+- [ ] 收敛这次新的 OOM 具体发生在 RoMa 采样链路的哪一步。
+- [ ] 判断最稳妥的修法是: 限制 sample 峰值 / 改 chunked KDE / CPU fallback / 动态降采样。
+- [ ] 做最小验证后再决定是否重新发起正式长跑。
+
+### 状态
+**目前仍在阶段5** - 当前从“正式长跑观察”切换到“新 OOM 的根因收敛与修复”。
+
+## [2026-03-22 10:47:21] [Session ID: 2e546d88-242b-47b8-a6a3-eff09359ded0] [记录类型]: 记录用户对 extensive 质量边界的新约束
+
+### 用户新约束
+- extensive 模式下不要随便降低样本数。
+- 只有在可以证明不影响质量时,才允许动样本规模。
+- 如果最终确认这台机器显存就是不够正式跑,不要勉强硬跑。
+
+### 当前执行策略
+- 优先尝试“不改样本数、不改采样语义”的显存削峰方案。
+- 当前最优先候选是把 `RoMaV2.sample -> kde()` 内部的整块 `torch.cdist(x, x)` 改成等价分块计算。
+- 若等价削峰后仍然无法完成,则如实给出“当前 GPU 不适合该 formal extensive 配置”的结论,不通过偷偷降样本糊弄跑通。
+
+### 状态
+**目前仍在阶段5** - 已记录用户质量边界,接下来只评估等价显存优化方案。
+
+## [2026-03-22 10:49:43] [Session ID: 1774147758-2955119] [记录类型]: 核对 run_multiview_reconstruction 的视频采样语义
+
+### 目标
+- 确认多视角入口在视频源输入下,是否逐帧抽取全部帧,还是先按某种规则做稀疏采样。
+- 找到实际控制采样行为的代码位置和配置项。
+
+### 执行计划
+- [ ] 阅读 `run_multiview_reconstruction.py` 与 `preprocess_multiview.py` 的入口调用链。
+- [ ] 阅读 `preprocess_video.py` 与相关配置,确认视频帧抽取与 subsample 逻辑。
+- [ ] 整理成“现象 -> 代码证据 -> 结论”的答复。
+
+### 状态
+**目前在阶段2** - 正在读取入口与预处理实现,确认视频帧是全量抽帧还是抽帧后再二次下采样。
+
+## [2026-03-22 10:49:43] [Session ID: 2e546d88-242b-47b8-a6a3-eff09359ded0] [记录类型]: 启动 `kde` 分块修复后的 Stage 1 最小动态验证
+
+### 验证目的
+- 不立刻重跑完整 extensive。
+- 先只重跑 `frame_to_model_icp`,确认新的 `kde()` 分块实现是否能越过正式长跑里 `frame 13` 左右的 OOM。
+
+### 验证标准
+- 若再次在 `sample() -> kde() -> torch.cdist()` 报 OOM,则当前等价削峰方案不足。
+- 若稳定越过 `frame 13` 并继续推进,则说明这次修法对真实场景有效,下一步再考虑重新发起完整 extensive。
+
+### 状态
+**目前仍在阶段5** - 即将启动仅 Stage 1 的动态验证。
+
+## [2026-03-22 10:50:09] [Session ID: 2e546d88-242b-47b8-a6a3-eff09359ded0] [记录类型]: `kde` 分块修复后的 Stage 1 probe 已启动
+
+### 启动信息
+- 主 PTY 会话 ID: `32510`
+- 主日志:
+  - `/tmp/video_to_world_flashvsr_reference_xhc_bai_stage1_probe_kdefix_20260322_104955.log`
+- GPU 日志:
+  - `/tmp/video_to_world_flashvsr_reference_xhc_bai_stage1_probe_kdefix_gpu_20260322_104955.log`
+- 实际命令:
+  - `pixi run python -m frame_to_model_icp --config.root-path output/flashvsr_reference_xhc_bai --config.icp-early-stopping-min-delta 5e-06 --config.out-suffix _zzkdefix_probe_20260322_104955`
+
+### 状态
+**目前仍在阶段5** - probe 已启动,接下来重点观察它能否越过 `frame 13` 并继续推进。
+
+## [2026-03-22 10:50:28] [Session ID: 1774147758-2955119] [记录类型]: 已确认多视角视频输入的采样语义
+
+### 已完成
+- [x] 阅读 `run_multiview_reconstruction.py` 与 `preprocess_multiview.py` 的入口调用链。
+- [x] 阅读 `preprocess_video.py` 与相关配置,确认视频帧抽取与 subsample 逻辑。
+- [x] 整理成“现象 -> 代码证据 -> 结论”的答复。
+
+### 已验证结论
+- `run_multiview_reconstruction.py` 不会直接逐帧处理视频,而是先把每个视角交给 `preprocess_multiview.py`。
+- `preprocess_multiview.py` 又会把每个视角交给 `preprocess_video.py`。
+- `preprocess_video.py` 对视频输入的真实行为是: 先全量解帧到 `frames/`,再按 `max_frames` / `max_stride` 做子采样,最后只对 `frames_subsampled/` 里的帧跑 DA3。
+- 因此默认情况下不是“全视频逐帧进入后续重建”,而是“全量解码 + 稀疏抽帧 + 对抽样帧做重建”。
+- 只有当视频总帧数不超过 `max_frames` 时,才会表现为逐帧全量使用。
+
+### 状态
+**目前在阶段4** - 证据已收集完成,下一步直接向用户汇报结论并给出可调参数说明。
+
+## [2026-03-22 10:52:34] [Session ID: 1774147758-2955119] [记录类型]: 用户要求落到真实多视角数据,核对默认采样实际取帧
+
+### 目标
+- 对当前多视角数据给出每个视角实际用了哪些帧。
+- 给出总帧数、实际 stride、选中帧索引范围,以及是否只覆盖前半段。
+
+### 执行计划
+- [ ] 找到这份多视角数据对应的 `scene_root` 与 `preprocess_frames.json`。
+- [ ] 读取每个视角的预处理元数据,确认 `num_frames_used` 与 `actual_stride`。
+- [ ] 如有必要,补查源视频总帧数,把“选中了哪些原始帧”算出来。
+- [ ] 整理成面向这份真实数据的结论。
+
+### 状态
+**目前在阶段2** - 正在定位当前多视角数据的真实预处理产物和元数据。
+
+## [2026-03-22 10:53:58] [Session ID: 1774147758-2955119] [记录类型]: 已核对真实多视角数据的默认采样结果
+
+### 已完成
+- [x] 找到这份多视角数据对应的 `scene_root` 与 `preprocess_frames.json`。
+- [x] 读取每个视角的预处理元数据,确认 `num_frames_used` 与 `actual_stride`。
+- [x] 补查真实解帧目录与内容匹配,确认到底选中了哪些原始帧。
+- [x] 整理成面向这份真实数据的结论。
+
+### 已验证结论
+- 当前核对的数据是: `source/flashvsr_reference_xhc_bai/full_scale2x` -> `output/flashvsr_reference_xhc_bai`。
+- 6 个视角每个都先解出了 121 帧原始图片。
+- 但后续每个视角只用了 100 帧,并且 `actual_stride=1`。
+- 通过对 `frames_subsampled` 与 `frames` 做文件内容匹配,已确认每个视角实际选中的是原始 `000001.png` 到 `000100.png`。
+- 原始 `000101.png` 到 `000121.png` 没有进入后续 DA3 和重建。
+- 联合场景总共用了 600 帧,按视角顺序拼接成全局索引。
+
+### 状态
+**目前在阶段4** - 真实数据的采样结果已经核对完成,下一步直接向用户汇报并解释为什么会出现“stride=1 但仍只用 100 帧”。
+
+## [2026-03-22 10:55:57] [Session ID: 2e546d88-242b-47b8-a6a3-eff09359ded0] [记录类型]: 启动第二轮 Stage 1 动态验证,检查显式清理是否能压低 late-frame 常驻显存
+
+### 验证目标
+- 复测 `frame 15` / `frame 16` 附近的 `[CUDA][after_empty_cache]` 与 `[before_roma]`。
+- 判断显式 `del + gc.collect() + empty_cache()` 是否真的把跨帧常驻显存压下去。
+
+### 判定口径
+- 若常驻显存明显下降且继续越过 `frame 16`,说明存在可修复的生命周期问题。
+- 若常驻显存几乎不降,而且仍在 refiner 处 OOM,就更接近“当前 GPU 对正式 extensive 不足”的结论。
+
+### 状态
+**目前仍在阶段5** - 即将启动第二轮 Stage 1 probe。
+
+## [2026-03-22 11:00:22] [Session ID: 2e546d88-242b-47b8-a6a3-eff09359ded0] [记录类型]: 启动第三轮 Stage 1 probe,验证 matcher 懒创建是否消除双份常驻
+
+### 验证目标
+- 观察 `frame 17` 左右的 `before_roma` / `after_roma`。
+- 重点看 `after_roma - before_roma` 是否还会出现接近一整份 matcher 的额外常驻跃迁。
+
+### 状态
+**目前仍在阶段5** - 即将启动第三轮 Stage 1 probe。
+
+## [2026-03-22 11:07:37] [Session ID: 1774147758-2955119] [记录类型]: 用户要求在 cmd.md 中补充 max_stride 的设置方法
+
+### 目标
+- 找到仓库里的 `cmd.md`。
+- 根据真实 CLI 参数,补上 `max_stride` 的设置方法和示例命令。
+- 如有必要,顺手说明多视角入口与单视角入口参数名的差异。
+
+### 执行计划
+- [ ] 阅读 `cmd.md` 当前内容与相关命令示例。
+- [ ] 核对 `preprocess_video.py`、`preprocess_multiview.py`、`run_multiview_reconstruction.py` 的真实参数名。
+- [ ] 更新 `cmd.md` 并做最小校验。
+
+### 状态
+**目前在阶段2** - 正在定位 `cmd.md` 并核对参数名。
+
+## [2026-03-22 11:08:11] [Session ID: 1774147758-2955119] [记录类型]: 用户要求在 cmd.md 中补充设置 stride 的方法
+
+### 目标
+- 在仓库文档中明确写出如何通过命令行设置视频采样 stride。
+- 同时区分多视角入口和单视频预处理入口的参数名。
+
+### 执行计划
+- [ ] 检查仓库中是否已有 `cmd.md`。
+- [ ] 核对 `run_multiview_reconstruction.py` 与 `preprocess_video.py` 的实际参数名。
+- [ ] 更新 `cmd.md`,补充可直接复制的命令示例。
+
+### 状态
+**目前在阶段3** - 正在定位现有命令文档并准备写入 stride 设置说明。
+
+## [2026-03-22 11:09:20] [Session ID: 1774147758-2955119] [记录类型]: 已在 docs/cmd.md 补充 stride 设置方法
+
+### 已完成
+- [x] 检查仓库中是否已有 `cmd.md`。
+- [x] 核对 `run_multiview_reconstruction.py` 与 `preprocess_video.py` 的实际参数名。
+- [x] 更新 `docs/cmd.md`,补充可直接复制的命令示例。
+
+### 已验证结果
+- 已在 `docs/cmd.md` 新增“设置视频预处理的 stride”小节。
+- 已区分多视角总入口 `--preprocess-max-stride`、联合预处理 `--max-stride`、单视频预处理 `--max_stride`。
+- 已补充 Stage 1 的 `--config.alignment.stride` 说明,避免和 Stage 0 混淆。
+- 已写明 `max_stride` 只是上限,实际结果还要看 `preprocess_frames.json` 里的 `actual_stride` 与 `num_frames_used`。
+
+### 状态
+**目前在阶段4** - 文档更新完成,下一步向用户汇报修改位置和可直接使用的命令。
+
+## [2026-03-22 11:12:30] [Session ID: 3515473] [记录类型]: 继续 extensive Stage 1 OOM 排查,准备收口已停止的 probe 并追查 inner refresh 生命周期
+
+### 背景
+- 用户确认上一轮 probe "已经停了"。
+- 当前目标不变: 在不随意降低样本数的前提下,继续推进 `source/flashvsr_reference_xhc_bai` 的 `extensive` 模式。
+- 根据上一轮动态证据,外层 matcher 常驻问题已明显缓解,当前最强候选问题缩到 `compute_roma_matches_for_frame()` 的 inner refresh 生命周期。
 
 ### 当前主假设
-- 这版修法如果成立,应当先体现为:
-  - 新增单测全部通过
-  - 真实 Stage 1 的炸点继续后移,或直接跑通
+- 主假设:
+  - 帧内每 4 个新 pair 的 refresh 路径仍然存在“旧 matcher 未完全回收就重建新 matcher”的问题,导致 late-frame 常驻显存台阶式抬升。
 - 备选解释:
-  - 单测只覆盖 device 迁移语义,但真实 OOM 还可能来自别的逐帧 GPU 常驻对象。
+  - 即使 refresh 生命周期进一步修好,late-frame 的 refiner 峰值本身也可能最终超过这张卡的可用显存。
 
-### 下一步行动
-- [ ] 修复 `tests/test_roma_memory_offload.py` 中过严的 device 断言。
-- [ ] 重新跑 `py_compile` 和该单测,确认本地验证链通过。
-- [ ] 基于 fresh root 重跑真实 Stage 1,检查是否越过先前 frame 12 左右的 OOM 点。
-
-### 状态
-**目前仍在阶段3** - 正在先打通新增显存管理修法的本地验证,然后立刻进入真实 Stage 1 长跑验证。
-## [2026-03-21 23:33:30] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 新增显存管理修法的本地验证链已打通,转入真实 Stage 1 长跑
-
-### 已完成事项
-- [x] 修复 `tests/test_roma_memory_offload.py` 中过严的 device 断言。
-- [x] 跑通 `py_compile` 与新增单测。
-
-### 当前状态
-**目前仍在阶段3** - 本地短验证已通过,现在进入 fresh root 上的真实 Stage 1 长跑,检查默认 RoMa 路径是否越过先前 OOM 点。
-## [2026-03-21 23:05:30] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 已确认 RoMaV2 显存是跨帧累计,转入“按帧刷新 matcher”后的真实 Stage 1 再验证
-
-### 已验证结论
-- [x] CPU 下沉修法有效,已把默认失败点从 frame 9 / 12 推迟到 frame 15。
-- [x] 最小探针证明: 单帧 15 个 pair 都能成功,但同一 matcher 实例会在每个 pair 后持续抬高 `memory_allocated()`。
-- [x] `gc.collect()` 不能回收这部分显存,`del matcher` 会带来部分回落。
-
-### 下一步行动
-- [ ] 基于“按帧刷新 matcher”的新代码,重新跑真实 Stage 1。
-- [ ] 验证是否越过 frame 15 并继续推进默认 RoMa 路径。
+### 本轮计划
+- [ ] 确认当前没有残留 pipeline 进程和 GPU 占用。
+- [ ] 阅读 Stage 1 / RoMa 相关代码与最新 probe 日志,补齐静态和动态证据。
+- [ ] 对 inner refresh 做最小修复,优先尝试“删除后不立刻重建,改为下次需要时懒创建”。
+- [ ] 运行最小验证: 语法检查 + RoMa 内存相关单测 + Stage 1 probe。
+- [ ] 根据结果判断是否可以继续正式 extensive,还是需要明确结论为当前 GPU 仍不足。
 
 ### 状态
-**目前仍在阶段3** - 已把问题收敛为 RoMaV2 的跨帧生命周期累计,现在进入新的真实 Stage 1 验证。
-## [2026-03-21 23:21:30] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 主流程内的 RoMa 新算 pair 仍会跨帧污染显存,改为独立进程预热剩余 cache
+**目前在阶段2** - 正在确认现场已停并准备进入 inner refresh 证据复盘。
 
-### 已验证结论
-- [x] memtrace 证明: 新算 pair 后的显存会在 `after_roma` 留下,并直接延续到下一帧 `before_roma`。
-- [x] frame 21 独立进程试跑成功,说明“每帧一个新进程”可以稳定产出 cache。
+## [2026-03-22 11:18:20] [Session ID: 3515473] [记录类型]: 准备启动去掉 inner refresh 后的 Stage 1 probe
 
-### 下一步行动
-- [ ] 用独立进程补齐 `src=21..49` 的剩余 RoMa cache。
-- [ ] cache 补齐后重跑真实 Stage 1,验证主流程只读 cache 时是否稳定跑完。
+### 启动目的
+- 只验证 `compute_roma_matches_for_frame()` 去掉帧内重复重建之后,Stage 1 能否越过 `frame 20`。
+- 暂不直接重跑完整 extensive,避免把 Stage 2/3 噪音混进本轮证据。
 
-### 状态
-**目前仍在阶段3** - 进入“先补齐剩余 RoMa cache,再重跑主流程”的执行阶段。
-## [2026-03-21 23:33:40] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 剩余 RoMa cache 已补齐到 src=49,开始重跑只读 cache 的真实 Stage 1
-
-### 已完成事项
-- [x] 使用独立进程补齐 `src=21..49` 的 RoMa cache。
-- [x] 当前 cache 覆盖已完整,不存在缺失帧。
-
-### 下一步行动
-- [ ] 重跑真实 Stage 1,验证全程只读 cache 是否稳定跑完。
-- [ ] 若 Stage 1 跑通,继续默认后半程 `skip-alignment` 验证。
+### 预期判定
+- 若 `frame 18~20` 的 `after_roma` 不再出现 `18.84 GiB -> 37.76 GiB` 这类台阶跃迁,说明本轮修复命中了主要问题。
+- 若仍然在相近位置 OOM,则需要转向评估“单个 matcher 连跑 late-frame pair 本身就超这张卡”的可能性。
 
 ### 状态
-**目前仍在阶段3** - 进入“全量 cache 命中”的真实主流程验证。
-## [2026-03-21 23:43:30] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 默认 RoMa 路径 Stage 1 已真实跑通,转入 skip-alignment 后半程验证
+**目前在阶段4** - 即将启动新的 Stage 1 probe。
 
-### 已完成事项
-- [x] 真实跑通 `frame_to_model_icp_50_2_offset0_allcache_20260321_2334`
-- [x] 证明全量 cache 命中后,RoMa 显存保持稳定
+## [2026-03-22 11:14:01] [Session ID: 1774147758-2955119] [记录类型]: 澄清 run_multiview_reconstruction 中 Stage 1 stride 与 preprocess stride 的区别
 
-### 下一步行动
-- [ ] 使用新的 `alignment-run` 执行 `run_reconstruction.py --config.skip-alignment`
-- [ ] 验证 Stage 2 / Stage 3 是否也能基于默认 RoMa Stage 1 结果继续跑通
+### 目标
+- 确认 `run_multiview_reconstruction.py` 是否能透传 `--config.alignment.stride` 给 ICP。
+- 明确 `--config.alignment.stride` 和 `--preprocess-max-stride` 是否等价。
 
 ### 状态
-**目前仍在阶段3** - Stage 1 已完成,正在进入默认后半程真实验证。
+**目前在阶段4** - 基于已经核对过的入口代码,正在整理分层结论和可直接复制的命令示例。
 
-## [2026-03-21 23:44:48] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 从上次未完成步骤继续,开始执行 skip-alignment 后半程真实验证
+## [2026-03-22 11:17:40] [Session ID: 1774147758-2955119] [记录类型]: 正在确认 Stage 1 中 num_frames 与 stride 的先后关系
 
-### 继续原因
-- 上一轮已经真实跑通默认 RoMa Stage 1, 当前最关键的未完成步骤是验证 Stage 2 / Stage 3 是否能基于该结果继续跑通。
-
-### 下一步行动
-- [ ] 检查 GPU / 进程现场,避免旧进程或旧显存状态污染本轮长跑。
-- [ ] 执行 `run_reconstruction.py --config.skip-alignment` 的真实后半程运行。
-- [ ] 记录新的首阻塞或完整成功结果,并同步回六文件。
-
-### 状态
-**目前仍在阶段3** - 正在从上次未完成步骤继续,准备启动 skip-alignment 后半程真实验证。
-
-## [2026-03-21 23:45:31] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: skip-alignment 后半程已启动并进入 inverse deformation 训练
-
-### 已观察到的现象
-- 现场 GPU 空闲, 没有残留旧进程。
-- `run_reconstruction.py --config.skip-alignment` 已成功进入 Stage 2。
-- 当前日志已出现 `Created inverse deformation model`、`Starting training...`、`Epoch 1/15`。
+### 现象
+- 用户问的是: Stage 0 先把 100 帧缩成 50 帧后,Stage 1 的 stride=2 会不会再从这 50 帧里缩成 25 帧。
 
 ### 当前假设
-- 主假设: 现阶段的首个验证重点已经从“能否启动”转为“Stage 2 训练能否稳定完成并继续推进到 Stage 3”。
-- 备选解释: 即使 Stage 2 能跑, 仍可能在 round-trip validation、GS 训练或 eval 阶段出现新的阻塞。
+- 主假设: Stage 1 是从 Stage 0 产出的底层序列按 `offset::stride` 先取索引,再用 `[:num_frames]` 截断。
+- 备选解释: Stage 1 也可能先限定 `num_frames`,再在这批帧里继续按 stride 二次减半。
+
+### 验证计划
+- 读取 `data/data_loading.py` 中 `load_data` 的索引生成逻辑。
+- 用代码证据回答用户,避免按 README 文案猜测。
 
 ### 状态
-**目前仍在阶段3** - 后半程真实长跑已开始, 正在等待 Stage 2 是否稳定完成。
+**目前在阶段4** - 正在核对 Stage 1 真实索引公式。
 
-## [2026-03-21 23:49:25] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: Stage 2 已完成并进入默认 LPIPS 的 GS 训练,开始评估测试运行是否需要缩短 GS 轮数
-
-### 已验证现象
-- round-trip validation summary 已写入日志。
-- 默认 LPIPS 权重已成功加载, `gs_3dgs` 训练已经进入真实迭代。
-- 当前默认配置是 10000 iter, 按现场速度估算需要约 2.5 小时。
-
-### 当前假设
-- 主假设: 对“测试运行”来说, 当前已经证明默认 Stage 2 / Stage 3 路径可启动, 下一步更有价值的是用正式参数缩短 GS 轮数,完成一次可收尾的 smoke 验证。
-- 备选解释: 也可能需要保留当前长跑直到完整结束, 才能证明默认终态没有隐藏问题。
-
-### 下一步行动
-- [ ] 查明 `run_reconstruction.py` 是否支持直接覆盖 GS `num_iters`。
-- [ ] 根据结果决定继续长跑,还是改为短程完整收尾验证。
-
-### 状态
-**目前仍在阶段3** - 默认 LPIPS GS 训练已启动, 正在判断测试运行的最优收尾方式。
-
-## [2026-03-21 23:49:59] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 已证实默认 GS 路径可启动,切换为短程 smoke 完整收尾验证
+## [2026-03-22 11:18:19] [Session ID: 1774147758-2955119] [记录类型]: 已确认两层 stride 的真实取帧公式
 
 ### 已验证结论
-- Stage 2 inverse deformation 与 round-trip validation 已真实完成。
-- 默认 LPIPS 的 `gs_3dgs` 训练已真实进入迭代, 不是启动即失败。
-- `run_reconstruction.py` 支持 `--config.gs.num-iters` 等正式覆盖参数。
+- Stage 0 的 `subsample_frames()` 逻辑是先根据总帧数算 `stride`,生成 `range(0, total_frames, stride)`,再用 `max_frames` 截断。
+- 因此 `--preprocess-max-frames 100 --preprocess-max-stride 2` 不等于“100 里取 50”。
+- Stage 1 的 `load_data()` 逻辑是 `all_indices[offset::stride][:num_frames]`。
+- 因此 Stage 1 不是“先取 `num_frames`,再在这批帧里继续按 stride 减半”,而是“先按 stride 选底层序列,再最多保留 `num_frames` 张”。
+- 如果 Stage 0 最终产出 100 帧,并且 Stage 1 用默认 `num_frames=50, stride=2`,那么 Stage 1 最终会取到 50 帧,不是 25 帧。
+
+### 状态
+**目前在阶段4** - 公式已核实完成,下一步直接向用户给出反例和正确心智模型。
+
+## [2026-03-22 11:32:10] [Session ID: 3515473] [记录类型]: 新 probe 已完成,旧 repeated-init 问题已修掉,当前阻塞转为单帧 20+ 新 pair 的累计常驻显存
+
+### 已完成
+- [x] 确认当前没有残留 pipeline 进程和 GPU 占用。
+- [x] 阅读 Stage 1 / RoMa 相关代码与最新 probe 日志,补齐静态和动态证据。
+- [x] 对 inner refresh 做最小修复,优先尝试“删除后不立刻重建,改为下次需要时懒创建”。
+- [x] 运行最小验证: 语法检查 + RoMa 内存相关单测 + Stage 1 probe。
+
+### 新结论
+- 这轮 probe 已稳定越过旧的 `frame 18/19` repeated-init 死亡点。
+- 但 `frame 20` 作为第一个 uncached 的 `20` 新 pair 帧,会把 `after_roma` 抬到 `20.81 GiB`,并把这层常驻显存带进 `frame 21`。
+- 因此当前待办已经切换为: 查清楚单帧内 repeated `match_images()` 的累计状态,再决定要不要做 pair 粒度 unload/offload。
+
+### 剩余待办
+- [ ] 给 `compute_roma_matches_for_frame()` / `_match_images_v2()` 加 pair 粒度显存日志,定位是哪一步开始累计。
+- [ ] 设计并验证更强的释放策略,优先评估 `model.cpu()` / hard unload 是否能打断单帧累计。
+- [ ] 若 pair 级释放仍无法控制峰值,再明确向用户下结论: 当前 GPU 对 formal extensive 的 Stage 1 仍不足。
+
+### 状态
+**目前在阶段5** - 已完成一轮有效修复,当前进入新的单帧累计显存诊断阶段。
+
+## [2026-03-22 11:29:41] [Session ID: 1774147758-2955119] [记录类型]: 核对之前 Stage 1 ICP 运行实际使用的 stride
+
+### 目标
+- 确认当前多视角场景目录下,之前实际跑过的 Stage 1 ICP 使用了什么 `alignment.stride`。
+- 如果可以,同时给出它相对原始视频的等效取帧步长。
+
+### 执行计划
+- [ ] 列出 `output/flashvsr_reference_xhc_bai` 下已有的 `frame_to_model_icp_*` 目录。
+- [ ] 读取对应 `after_non_rigid_icp/config.json` 里的 `alignment` 配置。
+- [ ] 结合 Stage 0 的真实 `actual_stride`,整理成用户能直接理解的结论。
+
+### 状态
+**目前在阶段4** - 正在核对已有 Stage 1 运行目录与落盘配置。
+
+## [2026-03-22 11:44:20] [Session ID: 3515473] [记录类型]: 准备启动 isolated-worker 版 Stage 1 probe
+
+### 启动目的
+- 验证 RoMaV2 子进程隔离后,主 Stage 1 进程能否越过 `frame 21`。
+- 重点观察 `before_roma/after_roma` 是否重新回到低位,而不是继续继承 `20.81 GiB` 平台。
+
+### 状态
+**目前在阶段5** - 即将启动 isolated-worker 版 probe。
+
+## [2026-03-22 11:37:30] [Session ID: 3515473] [记录类型]: 复核用户“已经停了”后的 probe 存活状态
+
+### 复核动机
+- 用户反馈“已经停了好像”。
+- 这类状态判断不能靠感觉,必须重新核对真实进程与日志尾部。
+
+### 动态证据
+- `pgrep -af 'frame_to_model_icp|run_reconstruction|train_gs|eval_gs'` 仍能看到:
+  - `pixi run python -m frame_to_model_icp --config.root-path output/flashvsr_reference_xhc_bai --config.icp-early-stopping-min-delta 5e-06 --config.out-suffix _zzisolated_probe_20260322_114420`
+  - 以及其 Python 子进程。
+- 日志 `/tmp/video_to_world_flashvsr_reference_xhc_bai_stage1_probe_isolated_20260322_114420.log` 已推进到:
+  - `Frame 26` 完整结束
+  - `Frame 27` 已进入 ICP / RoMa 阶段
+- 当前日志继续增长,未见新的 `Traceback` 或 OOM。
+
+### 当前结论
+- “看起来停了” 这一判断目前不成立。
+- 到 `2026-03-22 11:36:33 CST` 为止,isolated-worker 版 Stage 1 probe 仍在运行中。
+
+### 状态
+**目前在阶段5** - 继续观察 probe 是否完整跑完,再决定是否切正式 extensive。
+
+## [2026-03-22 11:38:20] [Session ID: 1774147758-2955119] [记录类型]: 验证全局 600 帧上 stride=6 的 Stage 1 取帧分布
+
+### 目标
+- 用当前真实联合元数据验证: `num_frames=100, stride=6` 时,Stage 1 是否会跨 6 个视角取样。
+- 判断这是否已经满足“不是单独每个镜头”的要求。
+
+### 状态
+**目前在阶段4** - 正在基于 `preprocess_frames.json` 的全局区间做索引分布验证。
+
+## [2026-03-22 11:49:30] [Session ID: 3515473] [记录类型]: isolated-worker 版 Stage 1 probe 已完整成功,决定复用其结果进入正式 extensive 下半段
+
+### 已验证结论
+- `/tmp/video_to_world_flashvsr_reference_xhc_bai_stage1_probe_isolated_20260322_114420.log` 中未发现 `Traceback` / `OutOfMemoryError` / `ERROR`。
+- 日志已完整推进到 `Frames: 100%|...| 49/49`。
+- `Frame 49` 结束后仍保持:
+  - `after_empty_cache allocated=0.37 GiB reserved=0.46 GiB`
+- 产物目录已存在:
+  - `output/flashvsr_reference_xhc_bai/frame_to_model_icp_50_2_offset0_zzisolated_probe_20260322_114420/after_non_rigid_icp`
+- 关键产物已落盘:
+  - `aligned_points.ply`
+  - `config.json`
+  - `roma_match_history.pt`
+  - `per_frame_global_deform_*.pt`
+  - `per_frame_local_deform_*.pt`
 
 ### 决策
-- 不继续让默认 10000 iter 长跑占用约 2.5 小时。
-- 改为执行一条短程但可完整收尾的 smoke 命令, 目标是尽快得到 Stage 3 的保存 / eval / 导出证据。
+- 不再重复执行正式 extensive 的 Stage 1。
+- 直接使用 `--config.skip-alignment --config.alignment-run frame_to_model_icp_50_2_offset0_zzisolated_probe_20260322_114420` 进入 Stage 2/3。
+
+### 这样做的原因
+- 这轮 probe 的 Stage 1 参数与 extensive 要求一致:
+  - `alignment.num_frames=50`
+  - `alignment.stride=2`
+  - `icp_early_stopping_min_delta=5e-06`
+- 因此复用不会降低质量,只是在避免无意义重复耗时。
 
 ### 状态
-**目前仍在阶段3** - 正在从“默认长跑已证明可启动”切换到“短程完整收尾验证”。
+**目前在阶段5** - 正在记录 probe 成功证据,下一步启动复用 Stage 1 结果的正式 extensive 下半段。
 
-## [2026-03-21 23:50:36] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 已启动短程默认 LPIPS smoke 验证
+## [2026-03-22 11:50:20] [Session ID: 3515473] [记录类型]: 准备启动复用 Stage 1 结果的正式 extensive 下半段
 
-### 运行参数
-- `run_reconstruction.py --config.skip-alignment`
-- `--config.gs.num-iters 150`
-- `--config.gs.save-every 100`
-- `--config.gs.eval-every 100`
-- 独立 `--config.gs.out-dir` 与独立日志文件
+### 启动命令
+- `pixi run python run_reconstruction.py --config.root-path output/flashvsr_reference_xhc_bai --config.mode extensive --config.skip-alignment --config.alignment-run frame_to_model_icp_50_2_offset0_zzisolated_probe_20260322_114420`
 
-### 状态
-**目前仍在阶段3** - 短程 smoke 已启动, 正在等待 Stage 2 重跑结束并进入 150 iter 的 GS 收尾验证。
-
-## [2026-03-21 23:52:19] [Session ID: 2435180] [记录类型]: 启用 git 发布支线上下文 `__git_publish`
-
-### 启用原因
-- 当前用户请求是独立的 Git 提交与推送动作。
-- 这和主线的 `pixi run setup` / 重建链路调试不是同一个执行目标。
-- 为避免把发布日志和主线调试日志混在一起,本轮改用支线六文件上下文 `__git_publish`。
-
-### 支线主题
-- 主题: 整理当前仓库改动,执行 git commit,并推送到 `https://github.com/raiscui/video_to_world.git`
-- 对应文件:
-  - `task_plan__git_publish.md`
-  - `notes__git_publish.md`
-  - `WORKLOG__git_publish.md`
-  - `LATER_PLANS__git_publish.md`
-  - `EPIPHANY_LOG__git_publish.md`
-  - `ERRORFIX__git_publish.md`
+### 运行目标
+- 跳过已成功验收的 Stage 1。
+- 正式进入 Stage 2 global optimization,随后继续 Stage 3.1 inverse deformation 和 Stage 3.2 训练。
+- 观察新的首个真实阻塞点是否已经转移到 Stage 2/3。
 
 ### 状态
-**主线保持不变** - 本条仅登记支线索引,后续发布动作只写入 `__git_publish` 文件集。
+**目前在阶段5** - 已写入正式下半段启动记录,下一步立刻拉起进程并观察首批日志。
 
-## [2026-03-21 23:53:50] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 发现 run_reconstruction 的 GS 覆盖参数未生效,转入静态验证
+## [2026-03-22 11:49:37] [Session ID: 1774147758-2955119] [记录类型]: 计算 6 镜头 x 120 帧配置下各阶段实际用帧数
 
-### 已观察到的现象
-- 明确传入 `--config.gs.num-iters 150`。
-- 真实日志仍显示 `GS training (3dgs): ... /10000`。
-- 同时 `--config.gs.out-dir` 已生效,说明不是所有 GS 子参数都失效。
-
-### 当前主假设
-- 主假设: `run_reconstruction.py` 在某个阶段重建 / 覆盖了 GS 配置,导致 `num_iters` 被模式默认值重新写回 10000。
-- 备选解释: 真正被训练代码读取的不是 CLI 看到的这个字段,而是另一份配置对象。
-
-### 下一步行动
-- [ ] 追踪 `num_iters` 在配置与调用链中的实际流向。
-- [ ] 根据证据决定修复覆盖逻辑,还是改用 `train_gs` 直接完成测试运行。
+### 目标
+- 结合 `preprocess_video.py` 与 `data_loading.py` 的真实公式,计算给定参数下 Stage 0 与 Stage 1 各自会用多少图。
+- 先确认重复传入两个 `--config.alignment.stride` 时,实际哪一个值生效。
 
 ### 状态
-**目前仍在阶段3** - 已确认 GS 轮数覆盖未生效, 正在做最小静态验证。
+**目前在阶段4** - 正在做最小 CLI 验证并按真实公式计算每阶段帧数。
 
-## [2026-03-21 23:56:16] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 修复后已启动真实 GS smoke 运行
+## [2026-03-22 11:52:40] [Session ID: 3515473] [记录类型]: Stage 2 首次启动失败,已确认是可选 GPU KD-tree 依赖缺失,改走 CPU KD-tree 继续
 
-### 运行策略
-- 复用已存在的 `inverse_deformation` 输出,跳过 Stage 3.1。
-- 通过修复后的 `run_reconstruction.py` 真实下发 `--config.gs.num-iters 150`。
-- 目标是获取 checkpoint / eval / final model 等落盘证据。
+### 现象
+- 复用 Stage 1 结果进入正式 extensive 后,Stage 2 启动即报:
+  - `ModuleNotFoundError: No module named 'torch_kdtree'`
 
-### 状态
-**目前仍在阶段3** - 修复后的真实 GS smoke 已启动, 正在等待 150 iter 收尾结果。
+### 静态证据
+- `configs/stage2_global_optimization.py` 明确把 `knn_backend` 默认设为 `gpu_kdtree`。
+- `algos/global_optimization.py` 的函数默认值其实是 `cpu_kdtree`。
+- `README.md` 也把 `torch_kdtree` 标成 optional 安装项。
 
-## [2026-03-22 00:00:34] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 修复后 GS smoke 训练已完成,新的首阻塞转为 auto eval 缺失 transforms
+### 已验证结论
+- 这不是 Stage 2 逻辑错误。
+- 这是“默认启用可选 GPU KD-tree 加速,但当前环境没装对应扩展”。
+- 将 Stage 2 改回 `cpu_kdtree` 只会主要影响速度,不会改变采样规模或故意降质量。
 
-### 已观察到的现象
-- 150 iter 的 GS 训练已经完成。
-- `checkpoint_000100.pt`、`checkpoint_000149.pt`、`model_final.pt`、`splats_3dgs.ply` 已落盘。
-- `eval_gs` 在读取 `/tmp/video_to_world_joint_scene_xhc_bai_fast_run_full_default_20260321_2238/gs_video/0000_extend_transforms.json` 时报 `FileNotFoundError`。
-
-### 当前主假设
-- 主假设: 当前 root 缺少 auto eval 依赖的 transforms 资产, 所以错误发生在评估阶段, 不在训练阶段。
-- 备选解释: `eval_gs` 对 joint scene 的默认 transforms 路径推导本身有兼容性问题。
-
-### 下一步行动
-- [ ] 追踪 `train_gs -> eval_gs` 的 transforms 路径来源。
-- [ ] 决定修默认路径, 还是通过正式参数关闭 auto eval 并完成无错误 smoke 收尾。
+### 决策
+- 不先去现场编译 `torch_kdtree`。
+- 直接重启正式 extensive 下半段,追加:
+  - `--config.stage2.knn-backend cpu_kdtree`
 
 ### 状态
-**目前仍在阶段3** - GS 训练本体已完成, 正在处理 auto eval 的 transforms 缺失问题。
+**目前在阶段5** - 正在记录新阻塞点,下一步用 CPU KD-tree 重启 Stage 2/3。
 
-## [2026-03-22 00:08:35] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: auto eval 的 transforms 问题已修复,新的首阻塞转为父训练进程占用显存导致子评估 OOM
+## [2026-03-22 11:53:58] [Session ID: 3515473] [记录类型]: CPU KD-tree 方案已推动正式 extensive 越过 Stage 2,并进入 Stage 3.1 训练
 
-### 已验证现象
-- 手动独立执行 `eval_gs` 已成功。
-- `train_gs` 内的 auto eval 仍然失败, 错误为 `torch.OutOfMemoryError`。
-- 报错中明确显示父训练进程在 auto eval 启动时仍占用约 24.87 GiB 显存。
+### 已验证结论
+-  已让 Stage 2 不再被  缺失阻塞。
+- Global optimization 已经从初始化推进到多轮真实迭代,并成功越过  的中后段。
+- 当前日志已进入  /  输出,说明 Stage 3.1 inverse deformation 已经开始。
 
-### 当前主假设
-- 主假设: `train_gs` 在 `subprocess.run(eval_gs)` 前没有释放 GPU 大对象, 子进程因此被父进程残留显存挤爆。
-- 备选解释: `eval_gs` 一次性把过多原图搬到 GPU, 即使父进程释放显存也仍可能超限。
-
-### 下一步行动
-- [ ] 追踪 `train_gs` auto eval 前的显存释放路径。
-- [ ] 做最小修复并再次跑入口级 smoke,确认没有 error。
-
-### 状态
-**目前仍在阶段3** - 正在处理 auto eval 的跨进程显存占用问题。
-
-## [2026-03-22 00:16:43] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 默认后半程测试运行已完成,本轮真实阻塞已收敛并验证通过
-
-### 已完成事项
-- [x] 继续默认后半程真实运行,确认 Stage 2 与默认 LPIPS Stage 3.2 都能启动
-- [x] 修复 `run_reconstruction.py` 吞掉 `gs.num_iters` 显式覆盖的问题
-- [x] 修复 `eval_gs.py` 对缺失 `gs_video` transforms 的硬依赖
-- [x] 修复 `train_gs.py` 在 auto eval 前未释放父进程 CUDA 状态的问题
-- [x] 跑通入口级 smoke,确认最终日志中无 `Automatic eval failed` / `Traceback` / `[ERROR]`
-
-### 当前结果
-- 默认 Stage 1 成功目录:
-  - `/tmp/video_to_world_joint_scene_xhc_bai_fast_run_full_default_20260321_2238/frame_to_model_icp_50_2_offset0_allcache_20260321_2334`
-- 最终无 error 的入口级 smoke 目录:
-  - `/tmp/video_to_world_joint_scene_xhc_bai_fast_run_full_default_20260321_2238/frame_to_model_icp_50_2_offset0_allcache_20260321_2334/gs_3dgs_lpips_postoomfix_20260322_001016`
-- 最终关键日志:
-  - `/tmp/video_to_world_xhc_bai_run_reconstruction_postoomfix_20260322_001016.log`
+### 当前状态判断
+- 当前主流程已经越过:
+  - Stage 1
+  - Stage 2
+- 当前正在进行:
+  - Stage 3.1 inverse deformation
+- 下一个待观察节点:
+  - Stage 3.1 是否完整结束
+  - Stage 3.2 2DGS / 3DGS 是否启动
+  - 自动 eval 是否再次暴露新问题
 
 ### 状态
-**目前在阶段4** - 本轮默认后半程测试运行已完成,正在整理最终交付结论。
-## [2026-03-22 00:25:40] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 回答 gs_video transforms 与自动降级语义
+**目前在阶段5** - 正在继续观察 Stage 3.1 训练,并等待进入 GS 阶段。
 
-### 已确认结论
-- `gs_video/0000_extend_transforms.json` 是 DA3 在导出 `gs_video/0000_extend.mp4` 时同步导出的 NeRF-style 相机轨迹文件。
-- 文件内包含评估所需的全局内参(`fl_x/fl_y/cx/cy/w/h`)与每帧 `transform_matrix` 相机位姿。
-- 缺少该文件时, `eval_gs` 现在会自动关闭 `render_gs_video_path`,仅保留 `input_poses` 与 `optimised_poses` 两条渲染分支。
-- 这不会影响 GS 训练本体与最终 checkpoint / ply 结果,但会影响沿 DA3 flythrough 轨迹的那条 novel-view 评估输出。
+## [2026-03-22 11:57:10] [Session ID: 3515473] [记录类型]: 更正上一条被 shell 命令替换污染的进度记录,正式确认 extensive 已越过 Stage 2 并进入 Stage 3.1
 
-### 状态
-**目前在阶段4** - 代码与验证都已完成,正在向用户交付最终说明与影响分析。
-## [2026-03-22 01:22:38] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 继续追踪缺失 transforms 是否可由现有场景数据重建
+### 说明
+- 上一条 `2026-03-22 11:53:58` 记录在写入时误用了未加引号 heredoc。
+- 由于正文包含反引号,其中部分内容被 shell 当成命令替换,导致文字缺失。
+- 本条是对应的正式更正版本,后续以本条为准。
 
-### 已观察到的现象
-- 用户怀疑缺失的 `0000_extend_transforms.json` 对应的是 "Camera moves in a clockwise circular path"。
-- 本地源码已确认存在 DA3 相机轨迹生成逻辑,并且 `extend` / `wander` / `smooth` 等模式在第三方实现中有明确分支。
+### 已验证结论
+- `--config.stage2.knn-backend cpu_kdtree` 已让 Stage 2 不再被 `torch_kdtree` 缺失阻塞。
+- Global optimization 已经从初始化推进到多轮真实迭代,并成功越过 `iter=100` 的中后段。
+- 当前日志已进入 `Training:` / `Epoch x/30` 输出,说明 Stage 3.1 inverse deformation 已经开始。
 
-### 当前主假设
-- 主假设: 可以基于现有 scene 数据和 DA3 的轨迹生成逻辑,在不重跑完整预处理的前提下补生成一个兼容 `eval_gs` 的 transforms 文件。
-- 备选解释: `extend` 轨迹依赖 DA3 推理阶段的中间状态,不能仅靠现有 root 中的最终产物无损复刻。
-
-### 下一步行动
-- [ ] 阅读 DA3 的 `camera_trj_helpers.py` 与 `gs_renderer.py`,确认 `extend` / `wander` 的真实轨迹几何含义。
-- [ ] 检查当前 scene root 是否具备反推该轨迹所需的位姿和内参。
-- [ ] 若证据充分,直接生成缺失的 transforms JSON 并做最小验证。
-
-### 状态
-**目前在阶段4** - 正在验证是否能安全补生成 `gs_video/0000_extend_transforms.json`。
-## [2026-03-22 01:26:11] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 已补生成缺失的 `0000_extend_transforms.json` 并完成动态验证
-
-### 已完成事项
-- [x] 阅读 DA3 的 `camera_trj_helpers.py` 与 `gs_renderer.py`,确认 `extend` / `wander` 的真实轨迹几何含义。
-- [x] 检查当前 scene root 是否具备反推该轨迹所需的位姿和内参。
-- [x] 基于 `exports/npz/results.npz` 补生成 `gs_video/0000_extend_transforms.json`。
-- [x] 用 `load_nerf_transforms_json()` 和 `eval_gs --config.max-frames 3` 验证新文件可被评估链路直接使用。
-
-### 当前结论
-- `0000_extend_transforms.json` 已成功生成并落盘:
-  - `/tmp/video_to_world_joint_scene_xhc_bai_fast_run_full_default_20260321_2238/gs_video/0000_extend_transforms.json`
-- 它对应的是 DA3 `extend` 长轨迹,不是单独的纯 circular `wander` 文件。
-- 动态验证结果:
-  - `eval_gs` 已打印 `Loaded 3 gs_video camera poses from: .../0000_extend_transforms.json`
-  - 成功输出 `render_gs_video.mp4`
+### 当前状态判断
+- 当前主流程已经越过:
+  - Stage 1
+  - Stage 2
+- 当前正在进行:
+  - Stage 3.1 inverse deformation
+- 下一个待观察节点:
+  - Stage 3.1 是否完整结束
+  - Stage 3.2 2DGS / 3DGS 是否启动
+  - 自动 eval 是否再次暴露新问题
 
 ### 状态
-**目前在阶段4** - 补生成与验证已完成,正在向用户交付结果与差异说明。
-## [2026-03-22 01:48:36] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 继续判断当前机器是否因 GPU 显存不足而无法正式跑完整流程
+**目前在阶段5** - 正在继续观察 Stage 3.1 训练,并等待进入 GS 阶段。
 
-### 已观察到的现象
-- 用户进一步追问: 这台机器的 GPU 显存,是不是不足以正式跑完整流程。
-- 现有上下文里已经确认过一次 auto eval OOM,但也已经确认多个阶段与入口级 smoke 在修复后可正常完成。
+## [2026-03-22 11:57:54] [Session ID: 1774147758-2955119] [记录类型]: 用户询问如何设置输出目录
 
-### 当前主假设
-- 主假设: 当前已观察到的 OOM 主要来自评估前父训练进程未释放显存,不能直接推导为“整机显存不够跑完整流程”。
-- 备选解释: 即使修复了释放时机问题,默认全量参数下的某些阶段仍可能在当前显存上接近或超过上限。
-
-### 下一步行动
-- [ ] 查询本机 GPU 型号与显存容量。
-- [ ] 回看已有日志中的 OOM 与成功证据,区分“流程设计问题”与“容量天花板问题”。
-- [ ] 基于现有动态证据给出分层结论,明确哪些是已验证,哪些仍未验证。
+### 目标
+- 区分多视角联合入口、单场景流水线入口、Stage 0 预处理三种层面的输出目录参数。
+- 给出可直接复制的命令示例。
 
 ### 状态
-**目前在阶段4** - 正在补充硬件与日志证据,回答显存是否构成正式阻塞。
-## [2026-03-22 01:49:10] [Session ID: 019d0ead-8f40-77b2-b6a3-2ed88d658c78] [记录类型]: 关于“这台机器 GPU 显存是否不够正式跑完整流程”的结论收口
+**目前在阶段4** - 正在核对 `scene_root`、`root_path`、`output_root` 的真实语义。
 
-### 已完成事项
-- [x] 查询本机 GPU 型号与显存容量。
-- [x] 回看已有日志中的 OOM 与成功证据,区分“流程设计问题”与“容量天花板问题”。
-- [x] 基于现有动态证据给出分层结论,明确哪些是已验证,哪些仍未验证。
+## [2026-03-22 12:01:40] [Session ID: 3515473] [记录类型]: 正式 extensive 已越过 Stage 3.1,并进入 Stage 3.2 2DGS 训练
 
-### 当前结论
-- 本机 GPU 为 `NVIDIA RTX 6000 Ada Generation`, 总显存 `49140 MiB`。
-- 已验证过的 OOM 里,至少有两类不能直接归因于“卡太小”: 
-  - `train_gs -> eval_gs` 的 OOM 是父训练进程未释放约 `24.87 GiB` 显存导致的跨进程竞争,修复后入口级 smoke 已无 error 收尾。
-  - Stage 1 的默认 RoMa OOM 被进一步定位为 matcher 生命周期 / 新算 pair 显存累积问题; 在改成缓存预热后,默认 Stage 1 已真实跑通到 `frame_to_model_icp_50_2_offset0_allcache_20260321_2334`。
-- 因此,现有证据**不支持**把问题概括成“这台机器显存不够跑完整流程”。
-- 但也要保留边界: 当前真正完整验证过的是默认 Stage 1、Stage 2、GS smoke、入口级 smoke 与补生成后的 `eval_gs`。尚未拿到“默认 10000 iter 全量正式长跑已在本机完整收尾”的动态证据。
+### 已验证结论
+- inverse deformation 训练与验证已经完成,日志出现 `Round-trip validation summary`。
+- 管线已打印:
+  - `[PIPELINE] === Stage 3.2: 2DGS Training ===`
+- `train_gs` 已经真正开始迭代:
+  - `GS training (2dgs): ... 17/15000`
+
+### 当前状态判断
+- 当前正式 extensive 运行已经越过:
+  - Stage 1
+  - Stage 2
+  - Stage 3.1
+- 当前正在进行:
+  - Stage 3.2 2DGS 训练
+- 后续仍需继续观察:
+  - 2DGS 是否稳定长跑
+  - 之后的 3DGS 是否启动
+  - 自动 eval 与 `gs_video/0000_extend_transforms.json` 相关分支是否触发
 
 ### 状态
-**目前在阶段4** - 已形成分层结论,正在向用户解释“不是简单的显存不够,但也还不能把全量正式长跑说成已完全验证”。
+**目前在阶段5** - 正在长跑 2DGS 训练,后续继续观察关键切换点。

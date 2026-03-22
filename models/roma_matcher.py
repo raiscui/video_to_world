@@ -10,7 +10,11 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import subprocess
+import sys
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 import torch
@@ -459,7 +463,7 @@ def save_matches_to_cache(
 
 
 def compute_roma_matches_for_frame(
-    roma_matcher: RoMaMatcherWrapper,
+    roma_matcher: Optional[RoMaMatcherWrapper],
     images: torch.Tensor,  # (N, 3, H, W) in [0, 1]
     current_frame_idx: int,
     max_references: int = 20,
@@ -468,13 +472,15 @@ def compute_roma_matches_for_frame(
     cache_path: Optional[str] = None,
     cached_matches: Optional[dict[tuple[int, int], RoMaMatchData]] = None,
     reference_selection_mode: str = "strided",
-) -> list[RoMaMatchData]:
+) -> tuple[list[RoMaMatchData], Optional[RoMaMatcherWrapper]]:
     """
     Compute RoMa matches between the current frame and all selected previous frames.
     Optionally uses cached matches to avoid recomputation.
 
     Args:
-        roma_matcher: Initialized RoMa matcher
+        roma_matcher:
+            已初始化的 RoMa matcher。
+            当当前帧所有 pair 都能直接命中 cache 时,允许传入 None。
         images: All images tensor (N, 3, H, W) in [0, 1]
         current_frame_idx: Index of current frame
         max_references: Maximum number of reference frames
@@ -484,7 +490,15 @@ def compute_roma_matches_for_frame(
         cached_matches: Optional dictionary of cached matches: (src_idx, ref_idx) -> RoMaMatchData
 
     Returns:
-        List of RoMaMatchData objects, one per reference frame
+        matches_list:
+            当前帧和参考帧之间的 RoMa 匹配结果。
+        roma_matcher:
+            当前函数结束后仍应继续使用的 matcher 实例。
+            说明:
+            - 该返回值很重要,因为函数内部可能为了限制单帧内的 GPU 累积
+              而重建 matcher。
+            - 如果调用方继续持有旧实例,那内部刷新就只会停留在函数局部,
+              无法真正缩短外层生命周期。
     """
     ref_frames = select_reference_frames(
         current_frame_idx,
@@ -494,7 +508,7 @@ def compute_roma_matches_for_frame(
     )
 
     if not ref_frames:
-        return []
+        return [], roma_matcher
 
     matches_list: list[RoMaMatchData] = []
     current_image = images[current_frame_idx]
@@ -503,10 +517,7 @@ def compute_roma_matches_for_frame(
     computed_pairs = []
     cached_pairs = []
 
-    computed_since_refresh = 0
-    refresh_every_n_new_pairs = 4
-
-    for ref_pos, ref_idx in enumerate(ref_frames):
+    for ref_idx in ref_frames:
         pair = (current_frame_idx, ref_idx)
 
         # Check cache first
@@ -516,6 +527,12 @@ def compute_roma_matches_for_frame(
             continue
 
         # Compute match if not in cache
+        if roma_matcher is None:
+            raise ValueError(
+                "RoMa matcher is required when uncached pairs need to be computed. "
+                "Pass a matcher instance or route this frame through an isolated worker."
+            )
+
         ref_image = images[ref_idx]
 
         kpts_src, kpts_ref, certainty = roma_matcher.match_images(
@@ -535,34 +552,6 @@ def compute_roma_matches_for_frame(
             )
             matches_list.append(match_data)
             computed_pairs.append(pair)
-            computed_since_refresh += 1
-
-        if (
-            computed_since_refresh >= refresh_every_n_new_pairs
-            and ref_pos + 1 < len(ref_frames)
-            and roma_matcher.version == "v2"
-            and str(roma_matcher.device).startswith("cuda")
-            and torch.cuda.is_available()
-        ):
-            # RoMaV2 在同一 matcher 实例里连续计算多个新 pair 时,
-            # `memory_allocated()` 会明显抬升。这里按小批次重建 matcher,
-            # 把这部分累计限制在当前批次内,避免单帧内继续堆到 OOM。
-            logger.info(
-                "Frame %d: refreshing RoMa matcher after %d new pairs to cap GPU accumulation",
-                current_frame_idx,
-                computed_since_refresh,
-            )
-            refresh_device = str(roma_matcher.device)
-            refresh_model_type = roma_matcher.model_type
-            refresh_version = roma_matcher.version
-            del roma_matcher
-            torch.cuda.empty_cache()
-            roma_matcher = RoMaMatcherWrapper(
-                device=refresh_device,
-                model_type=refresh_model_type,
-                version=refresh_version,
-            )
-            computed_since_refresh = 0
 
     # Log cache usage
     if cached_matches is not None:
@@ -574,7 +563,112 @@ def compute_roma_matches_for_frame(
         elif computed_pairs:
             logger.info(f"Frame {current_frame_idx}: Computed {len(computed_pairs)} pairs (no cache hits)")
 
-    return matches_list
+    return matches_list, roma_matcher
+
+
+def frame_has_uncached_roma_pairs(
+    *,
+    current_frame_idx: int,
+    max_references: int,
+    cached_matches: Optional[dict[tuple[int, int], RoMaMatchData]],
+    reference_selection_mode: str = "strided",
+) -> bool:
+    """判断当前帧是否仍有未命中缓存的 RoMa pair."""
+    ref_frames = select_reference_frames(
+        current_frame_idx,
+        current_frame_idx,
+        max_references,
+        mode=reference_selection_mode,
+    )
+    if not ref_frames:
+        return False
+    if cached_matches is None:
+        return True
+    return any((current_frame_idx, ref_idx) not in cached_matches for ref_idx in ref_frames)
+
+
+def compute_roma_matches_for_frame_isolated(
+    *,
+    root_path: str,
+    num_frames: int,
+    stride: int,
+    current_frame_idx: int,
+    max_references: int,
+    num_samples_per_pair: int,
+    certainty_threshold: float,
+    roma_version: str,
+    roma_model: str,
+    reference_selection_mode: str = "strided",
+    cache_path: Optional[str] = None,
+) -> list[RoMaMatchData]:
+    """在子进程里计算当前帧的 RoMa 匹配.
+
+    RoMaV2 的 GPU 状态会随着 pair 数在当前进程里累计。
+    即使 Python 张量和 matcher 对象已经删除,`memory_allocated()` 也不会
+    及时回落。这里用子进程边界做强释放,保证每个 uncached frame 的
+    匹配结束后整段 GPU 状态随进程退出一起回收。
+    """
+    repo_root = Path(__file__).resolve().parents[1]
+
+    with tempfile.TemporaryDirectory(prefix="roma_worker_") as tmpdir:
+        output_path = os.path.join(tmpdir, f"frame_{current_frame_idx:05d}_matches.pt")
+        cmd = [
+            sys.executable,
+            "-m",
+            "models.roma_matcher_worker",
+            "--root-path",
+            root_path,
+            "--num-frames",
+            str(num_frames),
+            "--stride",
+            str(stride),
+            "--current-frame-idx",
+            str(current_frame_idx),
+            "--max-references",
+            str(max_references),
+            "--num-samples-per-pair",
+            str(num_samples_per_pair),
+            "--certainty-threshold",
+            str(certainty_threshold),
+            "--roma-version",
+            roma_version,
+            "--roma-model",
+            roma_model,
+            "--reference-selection-mode",
+            reference_selection_mode,
+            "--output-path",
+            output_path,
+        ]
+        if cache_path is not None:
+            cmd.extend(["--cache-path", cache_path])
+
+        env = os.environ.copy()
+        existing_pythonpath = env.get("PYTHONPATH")
+        env["PYTHONPATH"] = (
+            f"{repo_root}:{existing_pythonpath}" if existing_pythonpath else str(repo_root)
+        )
+
+        result = subprocess.run(
+            cmd,
+            cwd=repo_root,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                "RoMa isolated worker failed.\n"
+                f"command: {' '.join(cmd)}\n"
+                f"stdout:\n{result.stdout}\n"
+                f"stderr:\n{result.stderr}"
+            )
+
+        payload = torch.load(output_path, map_location="cpu", weights_only=False)
+        matches = payload.get("matches", [])
+        if not isinstance(matches, list):
+            raise RuntimeError(f"Unexpected isolated worker payload at {output_path}: {type(matches)}")
+        return matches
 
 
 # ================================================================
