@@ -430,3 +430,27 @@
   - `run_reconstruction.py --config.dry-run` 已真实打印 `--config.num-iters 150`
   - 手动 `eval_gs` 已在真实 checkpoint 上跑通
   - 1 iter 入口级 smoke 已在最终日志中消除 auto eval error
+
+## [2026-03-22 12:12:40] [Session ID: eab9d6c3-318b-4c00-96b4-b400f09605f6] 问题: multiview extensive 使用旧的对齐参数字段名导致 Stage 0 后直接失败
+
+### 问题现象
+- 命令:
+  - `pixi run python run_multiview_reconstruction.py ... --config.alignment.num-frames 50 --config.alignment.stride 8 --config.alignment.offset 0 --config.mode extensive`
+- Stage 0 已完整成功。
+- 进入 `run_reconstruction.py` 后立即报错 `Unrecognized options`。
+
+### 原因
+- `run_multiview_reconstruction.py` 只是透传额外参数。
+- 当前 `run_reconstruction.py` 使用的真实字段路径是:
+  - `--config.stage1.alignment.num-frames`
+  - `--config.stage1.alignment.stride`
+  - `--config.stage1.alignment.offset`
+- 因此旧写法 `--config.alignment.*` 无法被识别。
+
+### 修复
+- 将透传参数改为 `--config.stage1.alignment.*`。
+- 对已经完成 Stage 0 的 scene root,直接调用 `run_reconstruction.py` 继续后续阶段,避免重复预处理。
+
+### 验证
+- `pixi run python run_reconstruction.py --help` 已显示正确字段。
+- Stage 0 已成功生成 `output/video_to_world/joint_scene_xhc_bai/exports/npz/results.npz`,可作为直接续跑输入。

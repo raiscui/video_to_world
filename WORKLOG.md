@@ -309,3 +309,21 @@
 ### 总结感悟
 - GPU OOM 不能一看到就归因于“显存小”。很多时候,真正的问题是对象生命周期、跨进程显存竞争,或者局部实现的平方级中间张量。
 - 回答“机器够不够”时,最好拆成“硬件上限是否低”和“当前代码路径是否把显存用对了”这两个问题分别说清楚。
+
+## [2026-03-22 12:16:10] [Session ID: eab9d6c3-318b-4c00-96b4-b400f09605f6] 任务名称: 按用户新要求切换到 joint_scene_xhc_bai 的多视角 extensive 重建
+
+### 任务内容
+- 停止之前仍在运行的 `output/flashvsr_reference_xhc_bai` 旧 extensive 流程。
+- 改为按用户指定的 `run_multiview_reconstruction.py` 参数体系,输出到 `output/video_to_world/joint_scene_xhc_bai`。
+- 在发现参数路径错误后,自动修正为当前代码真实支持的字段并继续执行 Stage 1/2/3。
+
+### 完成过程
+- 先检查并终止旧的 `run_reconstruction.py` / `train_gs` 相关进程,确认 GPU 计算进程清空。
+- 启动新的 `run_multiview_reconstruction.py`,完成 6 个视角的 Stage 0 预处理与联合合并,生成 `360` 帧的联合 `results.npz`。
+- 动态发现用户给出的 `--config.alignment.*` 在当前代码中已不是有效字段,并用 CLI 报错与 `--help` 双重确认正确字段为 `--config.stage1.alignment.*`。
+- 进一步探针确认当前环境缺失 `torch_kdtree`,因此续跑时显式切到 `--config.stage2.knn-backend cpu_kdtree`。
+- 最终从已生成好的 `output/video_to_world/joint_scene_xhc_bai` 直接续跑 `run_reconstruction.py`,现已进入 Stage 1 持续计算。
+
+### 总结感悟
+- 这次失败点不在算法,而在“multiview 入口透传参数时不会提前校验旧字段名”,导致错误要等到 Stage 0 结束后才暴露。
+- 对这种长流水线任务,先做 CLI 帮助探针和缺依赖探针,能少走很多弯路。
