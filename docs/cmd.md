@@ -59,6 +59,12 @@ pixi run python run_multiview_reconstruction.py \
 
 确认 dry-run 没问题后,去掉 `--dry-run`:
 
+  pixi run python run_multiview_reconstruction.py \
+    --views-root source/my4 \
+    --scene-root /data/video_to_world/joint_scene_my4 \
+    --config.mode extensive
+
+
 ```bash
 pixi run python run_multiview_reconstruction.py \
   --views-root source/flashvsr_reference_xhc_bai/full_scale2x \

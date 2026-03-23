@@ -86,13 +86,31 @@ source/flashvsr_reference_xhc_bai/full_scale2x/
   5/rgb/xhc-bai_97e474c6.mp4
 ```
 
+or VerseCrafter-style outputs such as:
+
+```text
+source/my4/
+  0/generated_videos/generated_video_0.mp4
+  1/generated_videos/generated_video_0.mp4
+  ...
+  11/generated_videos/generated_video_0.mp4
+```
+
 use the joint multiview entry point:
 
 ```bash
 python run_multiview_reconstruction.py \
-  --views-root source/flashvsr_reference_xhc_bai/full_scale2x \
+  --views-root source/my4 \
   --config.mode fast
 ```
+
+By default the script now auto-detects common per-view video locations in this order:
+
+- `rgb/*.mp4`
+- `generated_videos/*.mp4`
+- `*.mp4`
+
+You can still override this explicitly with `--video-glob <pattern>` when your layout is different.
 
 The joint script will:
 
@@ -114,8 +132,14 @@ python run_multiview_reconstruction.py \
 
 # Preview the joint preprocess + reconstruction commands without executing them
 python run_multiview_reconstruction.py \
-  --views-root source/flashvsr_reference_xhc_bai/full_scale2x \
+  --views-root source/my4 \
   --dry-run \
+  --config.mode fast
+
+# If your view video lives elsewhere, you can still force a custom pattern
+python run_multiview_reconstruction.py \
+  --views-root source/my4 \
+  --video-glob 'generated_videos/*.mp4' \
   --config.mode fast
 ```
 

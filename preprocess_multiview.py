@@ -22,6 +22,12 @@ from typing import Any, Sequence
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 SUPPORTED_IMAGE_EXTS = ("png", "jpg", "jpeg", "webp")
+DEFAULT_VIDEO_GLOB = "auto"
+AUTO_VIDEO_GLOBS = (
+    "rgb/*.mp4",
+    "generated_videos/*.mp4",
+    "*.mp4",
+)
 
 
 @dataclass(frozen=True)
@@ -41,7 +47,7 @@ class PreprocessMultiViewConfig:
     views_root: str
     scene_root: str | None = None
     view_ids: tuple[str, ...] = ()
-    video_glob: str = "rgb/*.mp4"
+    video_glob: str = DEFAULT_VIDEO_GLOB
     model_name: str = "depth-anything/DA3NESTED-GIANT-LARGE"
     image_ext: str = "png"
     max_frames: int = 100
@@ -57,6 +63,7 @@ def parse_args(argv: Sequence[str] | None = None) -> PreprocessMultiViewConfig:
             "Expected layout example:\n"
             "  <views_root>/0/rgb/foo.mp4\n"
             "  <views_root>/1/rgb/foo.mp4\n"
+            "  <views_root>/2/generated_videos/generated_video_0.mp4\n"
             "  ...\n"
             "Each view is preprocessed independently first, then merged into one results.npz."
         )
@@ -74,8 +81,11 @@ def parse_args(argv: Sequence[str] | None = None) -> PreprocessMultiViewConfig:
     )
     parser.add_argument(
         "--video-glob",
-        default="rgb/*.mp4",
-        help="Glob pattern, relative to each view directory, used to locate the source video.",
+        default=DEFAULT_VIDEO_GLOB,
+        help=(
+            "Glob pattern, relative to each view directory, used to locate the source video. "
+            "Default 'auto' tries: rgb/*.mp4, generated_videos/*.mp4, then *.mp4."
+        ),
     )
     parser.add_argument("--model-name", default="depth-anything/DA3NESTED-GIANT-LARGE")
     parser.add_argument("--image-ext", default="png")
@@ -140,13 +150,30 @@ def iter_view_dirs(views_root: Path, selected_view_ids: Sequence[str]) -> list[P
 def find_single_video(view_dir: Path, video_glob: str) -> Path:
     """在单个视角目录里定位唯一视频。"""
 
-    candidates = sorted(path for path in view_dir.glob(video_glob) if path.is_file())
-    if not candidates:
-        raise FileNotFoundError(f"No video matched '{video_glob}' under '{view_dir}'.")
-    if len(candidates) > 1:
-        candidate_text = ", ".join(str(path) for path in candidates)
-        raise ValueError(f"Expected exactly one video under '{view_dir}', found: {candidate_text}")
-    return candidates[0]
+    normalized_glob = video_glob.strip() or DEFAULT_VIDEO_GLOB
+
+    # `auto` 模式下按常见目录结构依次探测。
+    # 一旦某个模式命中唯一文件,就直接采用,避免要求用户记住内部布局差异。
+    candidate_globs = AUTO_VIDEO_GLOBS if normalized_glob == DEFAULT_VIDEO_GLOB else (normalized_glob,)
+    attempted_globs: list[str] = []
+
+    for candidate_glob in candidate_globs:
+        attempted_globs.append(candidate_glob)
+        candidates = sorted(path for path in view_dir.glob(candidate_glob) if path.is_file())
+        if not candidates:
+            continue
+        if len(candidates) > 1:
+            candidate_text = ", ".join(str(path) for path in candidates)
+            raise ValueError(
+                f"Expected exactly one video matching '{candidate_glob}' under '{view_dir}', found: {candidate_text}"
+            )
+        return candidates[0]
+
+    if normalized_glob == DEFAULT_VIDEO_GLOB:
+        attempted_text = ", ".join(attempted_globs)
+        raise FileNotFoundError(f"No video matched auto patterns [{attempted_text}] under '{view_dir}'.")
+
+    raise FileNotFoundError(f"No video matched '{normalized_glob}' under '{view_dir}'.")
 
 
 def read_scene_stem(view_dir: Path, video_path: Path) -> str:

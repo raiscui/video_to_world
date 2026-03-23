@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Sequence
 
 from preprocess_multiview import (
+    DEFAULT_VIDEO_GLOB,
     PreprocessMultiViewConfig,
     default_scene_root,
     discover_view_inputs,
@@ -36,7 +37,7 @@ class JointMultiViewConfig:
     views_root: str
     scene_root: str | None = None
     view_ids: tuple[str, ...] = ()
-    video_glob: str = "rgb/*.mp4"
+    video_glob: str = DEFAULT_VIDEO_GLOB
     preprocess_overwrite: bool = False
     preprocess_model_name: str = "depth-anything/DA3NESTED-GIANT-LARGE"
     preprocess_image_ext: str = "png"
@@ -53,6 +54,7 @@ def parse_args(argv: Sequence[str] | None = None) -> JointMultiViewConfig:
             "Expected layout example:\n"
             "  <views_root>/0/rgb/foo.mp4\n"
             "  <views_root>/1/rgb/foo.mp4\n"
+            "  <views_root>/2/generated_videos/generated_video_0.mp4\n"
             "  ...\n"
             "Extra arguments are forwarded to run_reconstruction.py."
         )
@@ -64,7 +66,14 @@ def parse_args(argv: Sequence[str] | None = None) -> JointMultiViewConfig:
         help="Combined scene root. Default: <views_root>_preprocessed beside the input folder.",
     )
     parser.add_argument("--view-ids", default="", help="Optional comma-separated subset, e.g. '0,1,4'.")
-    parser.add_argument("--video-glob", default="rgb/*.mp4")
+    parser.add_argument(
+        "--video-glob",
+        default=DEFAULT_VIDEO_GLOB,
+        help=(
+            "Glob pattern relative to each view directory. "
+            "Default 'auto' tries rgb/*.mp4, generated_videos/*.mp4, then *.mp4."
+        ),
+    )
     parser.add_argument("--preprocess-overwrite", action="store_true")
     parser.add_argument("--preprocess-model-name", default="depth-anything/DA3NESTED-GIANT-LARGE")
     parser.add_argument("--preprocess-image-ext", default="png")

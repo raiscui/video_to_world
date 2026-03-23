@@ -34,6 +34,34 @@ class RunMultiViewReconstructionTests(unittest.TestCase):
             self.assertEqual([item.view_id for item in inputs], ["2", "10"])
             self.assertEqual(inputs[0].scene_stem, "demo_scene")
 
+    def test_discover_view_inputs_auto_supports_generated_videos_layout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "my4"
+            self._write_view(
+                root,
+                "0",
+                "generated_video_0",
+                video_subdir="generated_videos",
+                write_manifest=False,
+            )
+            self._write_view(
+                root,
+                "11",
+                "generated_video_0",
+                video_subdir="generated_videos",
+                write_manifest=False,
+            )
+
+            inputs = discover_view_inputs(
+                PreprocessMultiViewConfig(
+                    views_root=str(root),
+                )
+            )
+
+            self.assertEqual([item.view_id for item in inputs], ["0", "11"])
+            self.assertTrue(inputs[0].input_video.endswith("generated_videos/generated_video_0.mp4"))
+            self.assertEqual(inputs[0].scene_stem, "generated_video_0")
+
     def test_build_preprocess_command_targets_joint_scene_root(self) -> None:
         config = JointMultiViewConfig(
             views_root="/tmp/views",
@@ -91,19 +119,28 @@ class RunMultiViewReconstructionTests(unittest.TestCase):
             self.assertEqual(len(payload["views"]), 2)
             self.assertIn("--config.root-path", payload["commands"]["reconstruct"])
 
-    def _write_view(self, root: Path, view_id: str, scene_stem: str) -> None:
+    def _write_view(
+        self,
+        root: Path,
+        view_id: str,
+        scene_stem: str,
+        *,
+        video_subdir: str = "rgb",
+        write_manifest: bool = True,
+    ) -> None:
         view_dir = root / view_id
-        rgb_dir = view_dir / "rgb"
+        rgb_dir = view_dir / video_subdir
         manifest_dir = view_dir / "manifests"
         rgb_dir.mkdir(parents=True, exist_ok=True)
-        manifest_dir.mkdir(parents=True, exist_ok=True)
 
         video_path = rgb_dir / f"{scene_stem}.mp4"
         video_path.write_bytes(b"")
-        (manifest_dir / f"{scene_stem}.json").write_text(
-            json.dumps({"scene_stem": scene_stem}, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        if write_manifest:
+            manifest_dir.mkdir(parents=True, exist_ok=True)
+            (manifest_dir / f"{scene_stem}.json").write_text(
+                json.dumps({"scene_stem": scene_stem}, ensure_ascii=False),
+                encoding="utf-8",
+            )
 
 
 if __name__ == "__main__":
