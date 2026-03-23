@@ -136,28 +136,6 @@ for base in roots:
 PY
 }
 
-detect_cuda_home() {
-  if [[ -n "${CUDA_HOME:-}" && -d "${CUDA_HOME}" ]]; then
-    printf '%s\n' "${CUDA_HOME}"
-    return 0
-  fi
-
-  if [[ -d /usr/local/cuda ]]; then
-    printf '/usr/local/cuda\n'
-    return 0
-  fi
-
-  python - <<'PY'
-try:
-    from torch.utils.cpp_extension import CUDA_HOME
-except Exception:
-    CUDA_HOME = None
-
-if CUDA_HOME:
-    print(CUDA_HOME)
-PY
-}
-
 create_nvidia_link_shims() {
   local shim_dir="$1"
   shift
@@ -341,23 +319,28 @@ ensure_tinycudann_dependencies() {
 
 prepare_cuda_build_env() {
   local detected_cuda_home=""
+  local detected_nvcc_path=""
   local link_shim_dir="/tmp/video_to_world-tinycudann-link-shims"
   local rpath_flags=""
   local lib_flags=""
   local include_flags=""
   local system_include_dirs=()
   local system_lib_dirs=()
+  local pixi_runtime_lib_dirs=()
   local nvidia_include_dirs=()
   local nvidia_lib_dirs=()
 
   detected_cuda_home="$(detect_cuda_home)"
-  if [[ -z "${detected_cuda_home}" || ! -d "${detected_cuda_home}" ]]; then
+  detected_nvcc_path="$(cuda_home_nvcc_path "${detected_cuda_home}" || true)"
+  if [[ -z "${detected_cuda_home}" || ! -d "${detected_cuda_home}" || -z "${detected_nvcc_path}" ]]; then
     printf 'tiny-cuda-nn 安装失败: 无法定位 CUDA_HOME,当前机器缺少可用 CUDA toolkit\n' >&2
     exit 1
   fi
 
   export CUDA_HOME="${detected_cuda_home}"
-  prepend_path_entries PATH "${CUDA_HOME}/bin"
+  export CUDACXX="${detected_nvcc_path}"
+  prepend_path_entries PATH "$(dirname "${detected_nvcc_path}")" "${CUDA_HOME}/bin"
+  sanitize_torch_cuda_arch_env
 
   # 这台机器的系统 CUDA 只带了基础 runtime 头。
   # 其余像 cublas / cusparse / nvrtc 等头文件来自 pixi 环境里的 NVIDIA wheel。
@@ -373,15 +356,24 @@ prepare_cuda_build_env() {
   mapfile -t nvidia_include_dirs < <(collect_pixi_nvidia_paths include)
   mapfile -t nvidia_lib_dirs < <(collect_pixi_nvidia_paths lib)
 
+  # 这里显式把 Pixi 环境自己的 `libstdc++` 放进构建期搜索路径最前面。
+  # 仅靠扩展文件里的 `RPATH` 不够稳,因为 Python 进程可能更早已经装入系统旧版 `libstdc++.so.6`。
+  if [[ -n "${CONDA_PREFIX:-}" ]]; then
+    pixi_runtime_lib_dirs=(
+      "${CONDA_PREFIX}/lib"
+      "${CONDA_PREFIX}/lib64"
+    )
+  fi
+
   prepend_path_entries CPATH "${system_include_dirs[@]}" "${nvidia_include_dirs[@]}"
   prepend_path_entries CPLUS_INCLUDE_PATH "${system_include_dirs[@]}" "${nvidia_include_dirs[@]}"
 
   create_nvidia_link_shims "${link_shim_dir}" "${nvidia_lib_dirs[@]}"
-  prepend_path_entries LIBRARY_PATH "${link_shim_dir}" "${system_lib_dirs[@]}" "${nvidia_lib_dirs[@]}"
-  prepend_path_entries LD_LIBRARY_PATH "${link_shim_dir}" "${system_lib_dirs[@]}" "${nvidia_lib_dirs[@]}"
+  prepend_path_entries LIBRARY_PATH "${link_shim_dir}" "${pixi_runtime_lib_dirs[@]}" "${system_lib_dirs[@]}" "${nvidia_lib_dirs[@]}"
+  prepend_path_entries LD_LIBRARY_PATH "${pixi_runtime_lib_dirs[@]}" "${link_shim_dir}" "${system_lib_dirs[@]}" "${nvidia_lib_dirs[@]}"
 
-  rpath_flags="$(build_rpath_flags "${system_lib_dirs[@]}" "${nvidia_lib_dirs[@]}")"
-  lib_flags="$(join_colon_paths "${link_shim_dir}" "${system_lib_dirs[@]}" "${nvidia_lib_dirs[@]}")"
+  rpath_flags="$(build_rpath_flags "${pixi_runtime_lib_dirs[@]}" "${system_lib_dirs[@]}" "${nvidia_lib_dirs[@]}")"
+  lib_flags="$(join_colon_paths "${link_shim_dir}" "${pixi_runtime_lib_dirs[@]}" "${system_lib_dirs[@]}" "${nvidia_lib_dirs[@]}")"
   include_flags="$(join_colon_paths "${system_include_dirs[@]}" "${nvidia_include_dirs[@]}")"
 
   # `CUDAExtension` 仍会把自己的 `-I/usr/local/cuda/include` 和 `-L/usr/local/cuda/lib64` 带进去。
@@ -390,6 +382,7 @@ prepare_cuda_build_env() {
 
   printf 'tiny-cuda-nn CUDA build env prepared:\n' >&2
   printf '  CUDA_HOME=%s\n' "${CUDA_HOME}" >&2
+  printf '  CUDACXX=%s\n' "${CUDACXX}" >&2
   printf '  include roots=%s\n' "${include_flags}" >&2
   printf '  library roots=%s\n' "${lib_flags}" >&2
 }

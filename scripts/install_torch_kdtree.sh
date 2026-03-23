@@ -36,26 +36,27 @@ run_timed_command() {
 
 prepare_cuda_build_env() {
   local detected_cuda_home=""
+  local detected_nvcc_path=""
 
   detected_cuda_home="$(detect_cuda_home)"
-  if [[ -z "${detected_cuda_home}" || ! -d "${detected_cuda_home}" ]]; then
+  detected_nvcc_path="$(cuda_home_nvcc_path "${detected_cuda_home}" || true)"
+  if [[ -z "${detected_cuda_home}" || ! -d "${detected_cuda_home}" || -z "${detected_nvcc_path}" ]]; then
     printf 'torch_kdtree 安装失败: 无法定位 CUDA_HOME,请先在 .envrc 或当前 shell 中设置有效的 CUDA toolkit 根目录\n' >&2
     exit 1
   fi
 
   export CUDA_HOME="${detected_cuda_home}"
-  prepend_path_entries PATH "${CUDA_HOME}/bin"
+  export CUDACXX="${detected_nvcc_path}"
+  prepend_path_entries PATH "$(dirname "${detected_nvcc_path}")" "${CUDA_HOME}/bin"
   prepend_path_entries CPATH "${CUDA_HOME}/include" "${CUDA_HOME}/targets/x86_64-linux/include"
   prepend_path_entries CPLUS_INCLUDE_PATH "${CUDA_HOME}/include" "${CUDA_HOME}/targets/x86_64-linux/include"
   prepend_path_entries LIBRARY_PATH "${CUDA_HOME}/lib64" "${CUDA_HOME}/targets/x86_64-linux/lib"
   prepend_path_entries LD_LIBRARY_PATH "${CUDA_HOME}/lib64" "${CUDA_HOME}/targets/x86_64-linux/lib"
+  sanitize_torch_cuda_arch_env
 
   # CMake / nvcc 有时会只认显式编译器路径。
   # 这里提前导出,避免它们继续受外部 PATH 污染。
-  if [[ -x "${CUDA_HOME}/bin/nvcc" ]]; then
-    export CUDACXX="${CUDA_HOME}/bin/nvcc"
-    export CMAKE_CUDA_COMPILER="${CUDA_HOME}/bin/nvcc"
-  fi
+  export CMAKE_CUDA_COMPILER="${CUDACXX}"
 
   printf 'torch_kdtree CUDA 环境已准备:\n' >&2
   printf '  CUDA_HOME=%s\n' "${CUDA_HOME}" >&2

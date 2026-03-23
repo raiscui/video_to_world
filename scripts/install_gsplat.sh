@@ -153,9 +153,43 @@ ensure_glm_headers() {
   exit 1
 }
 
+prepare_cuda_build_env() {
+  local detected_cuda_home=""
+  local detected_nvcc_path=""
+  local include_roots=""
+  local library_roots=""
+
+  detected_cuda_home="$(detect_cuda_home || true)"
+  detected_nvcc_path="$(cuda_home_nvcc_path "${detected_cuda_home}" || true)"
+  if [[ -z "${detected_cuda_home}" || -z "${detected_nvcc_path}" ]]; then
+    printf 'gsplat 安装失败: 无法定位包含 nvcc 的 CUDA_HOME。\n' >&2
+    printf '请先确保 pixi 环境或系统环境里存在可执行的 nvcc,再继续编译 gsplat。\n' >&2
+    exit 1
+  fi
+
+  export CUDA_HOME="${detected_cuda_home}"
+  export CUDACXX="${detected_nvcc_path}"
+  prepend_path_entries PATH "$(dirname "${detected_nvcc_path}")" "${CUDA_HOME}/bin"
+  prepend_path_entries CPATH "${CUDA_HOME}/include" "${CUDA_HOME}/targets/x86_64-linux/include"
+  prepend_path_entries CPLUS_INCLUDE_PATH "${CUDA_HOME}/include" "${CUDA_HOME}/targets/x86_64-linux/include"
+  prepend_path_entries LIBRARY_PATH "${CUDA_HOME}/lib64" "${CUDA_HOME}/targets/x86_64-linux/lib"
+  prepend_path_entries LD_LIBRARY_PATH "${CUDA_HOME}/lib64" "${CUDA_HOME}/targets/x86_64-linux/lib"
+  sanitize_torch_cuda_arch_env
+
+  include_roots="$(join_colon_paths "${CUDA_HOME}/include" "${CUDA_HOME}/targets/x86_64-linux/include")"
+  library_roots="$(join_colon_paths "${CUDA_HOME}/lib64" "${CUDA_HOME}/targets/x86_64-linux/lib")"
+
+  printf 'gsplat CUDA build env prepared:\n' >&2
+  printf '  CUDA_HOME=%s\n' "${CUDA_HOME}" >&2
+  printf '  CUDACXX=%s\n' "${CUDACXX}" >&2
+  printf '  include roots=%s\n' "${include_roots:-<none>}" >&2
+  printf '  library roots=%s\n' "${library_roots:-<none>}" >&2
+}
+
 main() {
   ensure_gsplat_repo
   ensure_glm_headers
+  prepare_cuda_build_env
   python -m pip install --no-build-isolation "${target_repo}"
 }
 

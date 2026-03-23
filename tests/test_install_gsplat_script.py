@@ -36,6 +36,8 @@ class InstallGsplatScriptTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("Detected broken glm submodule checkout", result.stdout)
             self.assertIn("glm headers restored successfully", result.stdout)
+            self.assertIn("gsplat CUDA build env prepared", result.stderr)
+            self.assertIn("CUDACXX=", result.stderr)
 
             glm_header = (
                 temp_repo
@@ -119,10 +121,13 @@ class InstallGsplatScriptTests(unittest.TestCase):
 
         fake_bin = temp_repo / "fake_bin"
         fake_bin.mkdir(parents=True, exist_ok=True)
+        fake_conda_prefix = temp_repo / "fake_conda_prefix"
+        (fake_conda_prefix / "bin").mkdir(parents=True, exist_ok=True)
 
         self._write_fake_timeout(fake_bin / "timeout")
         self._write_fake_git(fake_bin / "git")
         self._write_fake_find(fake_bin / "find")
+        self._write_fake_nvcc(fake_conda_prefix / "bin" / "nvcc")
 
         python_log = temp_repo / "fake_python.log"
         python_log.write_text("", encoding="utf-8")
@@ -134,6 +139,7 @@ class InstallGsplatScriptTests(unittest.TestCase):
         env = os.environ.copy()
         env["PATH"] = f"{temp_repo / 'fake_bin'}:{env['PATH']}"
         env["FAKE_PYTHON_LOG"] = str(python_log)
+        env["CONDA_PREFIX"] = str(temp_repo / "fake_conda_prefix")
         env.pop("HTTP_PROXY", None)
         env.pop("HTTPS_PROXY", None)
         env.pop("ALL_PROXY", None)
@@ -237,6 +243,18 @@ class InstallGsplatScriptTests(unittest.TestCase):
         os.chmod(path, stat.S_IRWXU)
 
     def _write_fake_find(self, path: Path) -> None:
+        path.write_text(
+            textwrap.dedent(
+                """\
+                #!/usr/bin/env bash
+                exit 0
+                """
+            ),
+            encoding="utf-8",
+        )
+        os.chmod(path, stat.S_IRWXU)
+
+    def _write_fake_nvcc(self, path: Path) -> None:
         path.write_text(
             textwrap.dedent(
                 """\

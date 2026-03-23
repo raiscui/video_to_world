@@ -3,6 +3,11 @@ name = "video_to_world"
 channels = ["conda-forge"]
 platforms = ["linux-64"]
 
+[activation.env]
+# 让所有 `pixi run` / `pixi shell` 进程都优先加载环境内的 C++ 运行时库。
+# 否则像 `tinycudann` 这类扩展,会先复用系统旧版 `libstdc++.so.6`,导入时缺少新的 CXXABI 符号。
+LD_LIBRARY_PATH = "$CONDA_PREFIX/lib:$CONDA_PREFIX/lib64:$LD_LIBRARY_PATH"
+
 [tasks]
 lint = "python -m ruff check ."
 format = "python -m ruff format ."
@@ -14,21 +19,7 @@ install-tinycudann = { cmd = "bash scripts/install_tinycudann.sh", depends-on = 
 # 这些任务依赖 `if ... then ... fi` 和参数展开,需要显式交给 bash 执行,
 # 否则会被 pixi 内置的 deno_task_shell 解析失败。
 setup-depth-anything-3 = "bash scripts/setup_depth_anything_3.sh"
-setup-romav2 = { cmd = ["bash", "-lc", """
-set -euo pipefail
-source scripts/pixi_task_helpers.sh
-clear_loopback_proxy_vars
-mkdir -p third_party
-if [ ! -d third_party/RoMaV2/.git ]; then
-  git clone https://github.com/Parskatt/RoMaV2 third_party/RoMaV2
-fi
-if git -C third_party/RoMaV2 apply --reverse --check ../../patches/romav2-dataclasses.patch >/dev/null 2>&1; then
-  echo "RoMaV2 patch already applied"
-else
-  git -C third_party/RoMaV2 apply ../../patches/romav2-dataclasses.patch
-fi
-python -m pip install -e "third_party/RoMaV2[fused-local-corr]"
-"""] }
+setup-romav2 = "bash scripts/setup_romav2.sh"
 setup = { depends-on = ["install-torch-stack", "setup-depth-anything-3", "install-gsplat", "install-tinycudann", "setup-romav2"] }
 install-torch-kdtree = "bash scripts/install_torch_kdtree.sh"
 
@@ -39,6 +30,7 @@ git = "*"
 ffmpeg = "*"
 cmake = "*"
 ninja = "*"
+cuda-nvcc = "12.8.*"
 
 [pypi-dependencies]
 numpy = "<2"

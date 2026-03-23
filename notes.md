@@ -1234,3 +1234,92 @@
 ### 当前阶段判断
 - 现在已经越过 Stage 1 和 Stage 2。
 - 当前真正运行的是 Stage 3.1,还没有切到 2DGS / 3DGS。
+
+## [2026-03-22 12:14:40] [Session ID: 019d1574-9c7e-79b0-b529-905b93f2462b] 笔记: `depth-anything-3` 当前更依赖本地代理,默认清代理会让 `setup` 卡在 clone
+
+## 来源
+
+### 来源1: `pixi run setup` 当前会话动态输出与旁路进程探针
+- 要点:
+  - `setup` 已进入 `setup-depth-anything-3`
+  - 子进程明确停在:
+    - `git clone https://github.com/ByteDance-Seed/depth-anything-3`
+    - `git-remote-https origin https://github.com/ByteDance-Seed/depth-anything-3`
+  - `third_party/depth-anything-3` 仅初始化到约 `84K`
+  - 此时仓库还没有可读 `HEAD`
+
+### 来源2: `git ls-remote https://github.com/ByteDance-Seed/depth-anything-3 HEAD` 最小网络对比实验
+- 要点:
+  - 直连环境:
+    - `20s` 超时
+  - 保留当前代理环境:
+    - 约 `1s` 成功返回 `41736238f5bced4debf3f2a12375d2466874866d HEAD`
+
+### 来源3: `scripts/setup_depth_anything_3.sh` 与 `scripts/pixi_task_helpers.sh`
+- 要点:
+  - `setup_depth_anything_3.sh` 开头会调用 `clear_loopback_proxy_vars`
+  - helper 允许用 `PIXI_KEEP_LOOPBACK_PROXY=1` 保留 loopback 代理
+  - 当前机器不存在 `/workspace/depth-anything-3` 本地镜像,因此脚本会落到 GitHub clone 分支
+
+## 综合发现
+
+### 现象
+- 当前 `setup` 不是全链路都失败。
+- 它稳定卡在 `depth-anything-3` 的 GitHub 拉取阶段。
+
+### 候选结论
+- 当前最强候选结论是:
+  - 这台机器眼下对 `depth-anything-3` 的访问更依赖本地代理。
+  - 默认“清理 loopback 代理”的防御逻辑,在本轮环境中变成了反效果。
+
+### 下一步验证
+- 用 `PIXI_KEEP_LOOPBACK_PROXY=1 pixi run setup` 重跑。
+- 如果 clone 能立刻推进,这条候选结论就会被进一步加强。
+
+## [2026-03-22 12:17:39] [Session ID: 019d1574-9c7e-79b0-b529-905b93f2462b] 笔记: 当前 `gsplat` 失败不是网络问题,而是环境缺失 `nvcc` 且脚本信任了错误的 `CUDA_HOME`
+
+## 来源
+
+### 来源1: `PIXI_KEEP_LOOPBACK_PROXY=1 pixi run setup` 当前会话输出
+- 要点:
+  - `depth-anything-3` 已成功完成 clone 和安装
+  - `gsplat` 主仓库与 `glm` 子模块也已准备完成
+  - 首个失败点稳定为:
+    - `error: nvcc not found at '/usr/local/cuda/bin/nvcc'`
+
+### 来源2: 当前 `pixi` Python 环境探针
+- 要点:
+  - `torch.utils.cpp_extension.CUDA_HOME = /usr/local/cuda`
+  - `shutil.which('nvcc') = None`
+  - `os.path.exists('/usr/local/cuda/bin/nvcc') = False`
+
+### 来源3: `.pixi` 环境文件探针
+- 要点:
+  - 找到了:
+    - `.pixi/envs/default/lib/python3.10/site-packages/nvidia/cuda_runtime/include/cuda.h`
+  - 没找到:
+    - `.pixi/.../bin/nvcc`
+
+### 来源4: 同仓库内的工作示例对比
+- 要点:
+  - `scripts/install_gsplat.sh` 目前没有 CUDA 环境准备步骤
+  - `scripts/install_tinycudann.sh` 已有更完整的 CUDA 环境准备逻辑
+  - `pixi run` 环境稳定提供:
+    - `CONDA_PREFIX=/root/autodl-tmp/home/rais/video_to_world/.pixi/envs/default`
+
+## 综合发现
+
+### 现象
+- 当前失败已经从“网络层”切换到了“编译工具链层”。
+- 报错不是随机的,而是稳定指向一个不存在的 `/usr/local/cuda/bin/nvcc`。
+
+### 候选结论
+- 当前最强候选结论是:
+  - 这套 `pixi` 环境只有运行时 CUDA 头和 wheel,没有 `nvcc`
+  - 同时脚本和 `torch` 都把 `CUDA_HOME` 指向了一个当前机器上并不存在的 `/usr/local/cuda`
+
+### 修复指向
+- 这更像环境层缺口,不是 `gsplat` 仓库源码层缺陷。
+- 后续修复应该优先:
+  - 为 `pixi` 环境补 `nvcc`
+  - 让脚本优先从 `CONDA_PREFIX` 或真实 `nvcc` 路径推导 `CUDA_HOME`

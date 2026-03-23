@@ -178,6 +178,124 @@
 - 当前主假设是:
   - 既然 `pixi run setup` 已 fresh verification 通过,这条真实联合入口至少应当能够进入 Stage 0,并继续对真实数据做处理。
 
+## [2026-03-22 12:11:56] [Session ID: 019d1574-9c7e-79b0-b529-905b93f2462b] [记录类型]: 新任务初始化 - 重新执行 `pixi run setup` 安装依赖
+
+### 目标
+- 按用户要求在当前工作区重新执行 `pixi run setup`,确认依赖已安装到可用状态。
+- 如果安装链路再次失败,收敛当前会话里的真实阻塞点,而不是直接继承旧会话的“已通过”结论。
+- 仅在直连失败且证据表明确实是网络问题时,再切换到用户提供的代理环境重试。
+
+### 已知背景
+- 历史记录显示上一会话已经把 `setup` 链路修到通过。
+- 但那是别的 Session 的动态证据,当前会话仍需重新执行并重新验证。
+- `EPIPHANY_LOG.md` 已记录一个高价值经验:
+  - 失效的 loopback 代理会把安装失败伪装成 TLS 或上游仓库问题。
+
+### 主假设
+- 当前主假设是:
+  - 既然仓库内的 `setup` 安装脚本已经过修复,本轮直接执行 `pixi run setup` 应该能通过,或至少把新的失败点收敛到单一任务。
+
+### 最强备选解释
+- 也可能出现以下情况:
+  - 当前机器环境与上次验证时相比有变化,导致某个编译依赖重新失效。
+  - 当前 shell 存在额外网络环境变量,让原本可通过的任务再次失败。
+
+### 最小验证计划
+- 先读取 `pixi.toml`,确认 `setup` 依赖链没有漂移。
+- 直接执行一次有时限的 `pixi run setup`。
+- 若失败,根据首个真实报错决定是否需要代理重试或进入脚本级排障。
+
+### 阶段
+- [x] 阶段1: 读取上下文并承接历史约束
+- [x] 阶段2: 复查 `setup` 依赖链配置
+- [ ] 阶段3: 执行 `pixi run setup`
+- [ ] 阶段4: 根据结果做验证记录与收尾
+
+### 状态
+**目前在阶段3** - 准备先按直连环境执行 `pixi run setup`, 用当前会话重新拿一份动态证据。
+
+## [2026-03-22 12:14:40] [Session ID: 019d1574-9c7e-79b0-b529-905b93f2462b] [记录类型]: 直连环境下的 `setup` 在 `depth-anything-3` clone 阶段被证伪
+
+### 动态证据
+- 真实执行 `pixi run setup` 后:
+  - `install-torch-stack` 很快返回 `Requirement already satisfied`
+  - `setup-depth-anything-3` 进入 `git clone https://github.com/ByteDance-Seed/depth-anything-3`
+  - 约 60 秒内无后续进展
+- 旁路进程探针显示:
+  - `pixi run setup`
+  - `bash scripts/setup_depth_anything_3.sh`
+  - `git clone https://github.com/ByteDance-Seed/depth-anything-3`
+  - `git-remote-https origin https://github.com/ByteDance-Seed/depth-anything-3`
+- 目录探针显示:
+  - `third_party/depth-anything-3` 仅约 `84K`
+  - `git rev-parse HEAD` 尚无输出
+- 最小网络对比实验:
+  - 清空代理后的 `git ls-remote https://github.com/ByteDance-Seed/depth-anything-3 HEAD` 在 `20s` 内超时
+  - 保留当前代理后的同一命令在约 `1s` 内成功返回 `HEAD`
+
+### 结论更新
+- 上一条“直接执行当前 `setup` 应可通过”的主假设,在当前机器环境里不成立。
+- 当前更强结论是:
+  - 这台机器此刻对该 GitHub 仓库更依赖本地代理。
+  - `scripts/setup_depth_anything_3.sh` 默认调用 `clear_loopback_proxy_vars`,会误伤当前有效代理。
+
+### 下一步
+- 使用当前会话的新证据调整执行方式:
+  - 保留现有代理变量
+  - 通过 `PIXI_KEEP_LOOPBACK_PROXY=1 pixi run setup` 重新验证
+
+### 阶段
+- [x] 阶段1: 读取上下文并承接历史约束
+- [x] 阶段2: 复查 `setup` 依赖链配置
+- [x] 阶段3: 执行 `pixi run setup`
+- [ ] 阶段4: 根据结果做验证记录与收尾
+
+### 状态
+**目前在阶段4** - 已确认当前失败点不是泛化的“网络不好”,而是 `setup` 默认旁路了当前有效的 loopback 代理,准备带 `PIXI_KEEP_LOOPBACK_PROXY=1` 重跑。
+
+## [2026-03-22 12:17:39] [Session ID: 019d1574-9c7e-79b0-b529-905b93f2462b] [记录类型]: 保留代理后 `setup` 推进到 `gsplat` 编译,新失败点收敛到缺失 `nvcc`
+
+### 动态证据
+- 带 `PIXI_KEEP_LOOPBACK_PROXY=1` 重跑后:
+  - `setup-depth-anything-3` 已成功完成 clone、checkout 和 editable 安装
+  - `install-gsplat` 也完成了主仓库 clone、目标 commit checkout、glm 子模块修复
+- 当前首个真实失败点:
+  - `error: nvcc not found at '/usr/local/cuda/bin/nvcc'. Ensure CUDA path '/usr/local/cuda' is correct.`
+
+### 静态证据
+- `scripts/install_gsplat.sh` 当前只负责仓库和 glm 子模块准备,没有像 `install_tinycudann.sh` 那样显式准备 CUDA 构建环境。
+- 当前 `pixi run python` 中:
+  - `torch.utils.cpp_extension.CUDA_HOME` 返回 `/usr/local/cuda`
+  - `which nvcc` 为 `None`
+  - `os.path.exists('/usr/local/cuda/bin/nvcc')` 为 `False`
+- 当前 `.pixi` 环境只看到 CUDA runtime 头文件:
+  - `.pixi/envs/default/lib/python3.10/site-packages/nvidia/cuda_runtime/include/cuda.h`
+  - 未发现 `.pixi/.../bin/nvcc`
+
+### 主假设
+- 当前主假设是:
+  - 这次不是单纯 PATH 漏传,而是当前 `pixi` 环境根本没有 `nvcc`,同时脚本又信任了错误的 `CUDA_HOME=/usr/local/cuda`。
+
+### 最强备选解释
+- 也可能 `nvcc` 实际由某个尚未检查到的 Conda/系统前缀提供,只是 `CUDA_HOME` 推导策略过于保守。
+
+### 最小修复方向
+- 先补环境层:
+  - 给 `pixi` 环境加入可用的 `cuda-nvcc`
+- 再补脚本层:
+  - 让 `detect_cuda_home` 优先识别 `CONDA_PREFIX` 或 `which nvcc` 推导出的真实前缀
+  - 让 `install-gsplat.sh` 在构建前显式导出 `CUDA_HOME` 与 `PATH`
+- 这样能同时覆盖 `gsplat` 和后续 `tinycudann`
+
+### 阶段
+- [x] 阶段1: 读取上下文并承接历史约束
+- [x] 阶段2: 复查 `setup` 依赖链配置
+- [x] 阶段3: 执行 `pixi run setup`
+- [ ] 阶段4: 根据结果做验证记录与收尾
+
+### 状态
+**目前仍在阶段4** - 当前已完成网络层证伪,并把新的主阻塞收敛为“环境缺 `nvcc` + 脚本使用错误 `CUDA_HOME`”,准备做环境层和脚本层的联动修复。
+
 ### 最强备选解释
 - 也可能环境依赖虽然装好了,但真实数据运行还会暴露:
   - GPU / 显存不足
@@ -1174,3 +1292,20 @@
 
 ### 主题
 - 核对 `CUDA_HOME` 缺失究竟是环境问题,还是 `install-torch-kdtree` 任务缺少自动探测。
+
+## [2026-03-22 12:42:35] [Session ID: codex-20260322-124235] [记录类型]: 启用支线上下文索引 - 继续调通 `pixi run setup`
+
+### 启用原因
+- 当前主线 `task_plan.md` 正被其他长跑任务持续追加,而本轮目标是单独把 `pixi run setup` 重新跑通。
+- 为避免把“环境安装排查”与“重建运行状态”混写,本轮切换到独立的 `__pixi_setup` 支线上下文集。
+
+### 支线上下文集
+- `task_plan__pixi_setup.md`
+- `notes__pixi_setup.md`
+- `WORKLOG__pixi_setup.md`
+- `LATER_PLANS__pixi_setup.md`
+- `ERRORFIX__pixi_setup.md`
+- `EPIPHANY_LOG__pixi_setup.md`
+
+### 主题
+- 延续上一轮已完成的 `gsplat` / `tinycudann` 修复,继续收敛并解决 `setup-romav2` 的下载稳定性问题,直到 `pixi run setup` 可重复通过。
